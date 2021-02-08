@@ -1,6 +1,6 @@
 from pathlib import Path
 import numpy as np
-from mdgraph.dataset import ContactMapDataset
+from mdgraph.data.dataset import ContactMapDataset
 
 
 TEST_DATA_PATH = Path(__file__).parent / "data/BBA-subset-100.h5"

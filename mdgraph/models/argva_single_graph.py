@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mdgraph.dataset import ContactMapDataset
+from mdgraph.data.dataset import ContactMapDataset
 from torch_geometric.nn import GCNConv, ARGVA
 from torch_geometric.data import DataLoader
 from molecules.plot.tsne import compute_tsne, plot_tsne_plotly
