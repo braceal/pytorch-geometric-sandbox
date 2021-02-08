@@ -13,3 +13,4 @@ def test_residue_onehot_encoding():
     num_unique_aa = len(np.unique(labels))
     onehot = aminoacid_int_to_onehot(labels)
     assert onehot.shape == (len(labels), num_unique_aa)
+    #np.save("onehot_bba_amino_acid_labels.npy", onehot)
