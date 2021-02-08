@@ -12,4 +12,5 @@ pip install --no-index torch-sparse -f https://pytorch-geometric.com/whl/torch-1
 pip install --no-index torch-cluster -f https://pytorch-geometric.com/whl/torch-1.7.0+cu102.html
 pip install --no-index torch-spline-conv -f https://pytorch-geometric.com/whl/torch-1.7.0+cu102.html
 pip install torch-geometric
+pip install -e .
 ```
