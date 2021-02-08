@@ -70,6 +70,8 @@ class ContactMapDataset(Dataset):
         if node_feature_path is not None:
             self.labels = np.load(node_feature_path)
             self.node_features = aminoacid_int_to_onehot(self.labels)
+            self.labels = torch.from_numpy(self.labels).to(torch.long)
+            self.node_features = torch.from_numpy(self.node_features)
         else:
             self.node_features, self.labels = None, None
 

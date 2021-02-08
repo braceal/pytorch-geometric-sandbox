@@ -30,6 +30,5 @@ def test_amino_acid_features():
         TEST_DATA_PATH, "contact_map", ["rmsd"], node_feature_path=amino_acid_features
     )
     sample = dataset[0]
-    assert sample["X"].num_features == 5
+    assert sample["X"].num_features == 13
     assert sample["X"].num_nodes == 28
-    print(sample["X"].y)
