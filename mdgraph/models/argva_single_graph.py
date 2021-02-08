@@ -54,7 +54,9 @@ class Discriminator(nn.Module):
 
 # Data
 path = Path(__file__).parent / "../../test/data/BBA-subset-100.h5"
-node_feature_path = Path(__file__).parent / "../../test/data/onehot_bba_amino_acid_labels.npy"
+node_feature_path = (
+    Path(__file__).parent / "../../test/data/onehot_bba_amino_acid_labels.npy"
+)
 dataset = ContactMapDataset(
     path, "contact_map", ["rmsd"], node_feature_path=node_feature_path
 )
@@ -94,9 +96,9 @@ def train():
     return loss
 
 
-def validate():
+def validate_with_rmsd():
     model.eval()
-    graph_embeddings = {"embeddings": [], "rmsd": []}
+    output = {"embeddings": [], "rmsd": []}
     with torch.no_grad():
         for sample in tqdm(loader):
             data = sample["X"]
@@ -104,15 +106,18 @@ def validate():
             z = model.encode(data.x, data.edge_index)
 
             # Collect embeddings for plot
-            emb = z.detach().cpu().numpy().sum(axis=0)
-            graph_embeddings["embeddings"].append(emb)
-            graph_embeddings["rmsd"].append(sample["rmsd"].detach().cpu().numpy())
+            emb = z.detach().cpu().numpy()
+            output["graph_embeddings"].append(emb.sum(axis=0))
+            output["node_embeddings"].append(emb)
+            output["node_labels"].append(data.y.detach().cpu().numpy())
+            output["rmsd"].append(sample["rmsd"].detach().cpu().numpy())
 
-    graph_embeddings = {
-        key: np.array(val).squeeze() for key, val in graph_embeddings.items()
-    }
+    output = {key: np.array(val).squeeze() for key, val in output.items()}
 
-    return graph_embeddings
+    print(output["node_embeddings"].shape)
+    print(output["node_labels"].shape)
+
+    return output
 
 
 for epoch in range(1, 151):
@@ -120,11 +125,18 @@ for epoch in range(1, 151):
     print(f"Epoch: {epoch:03d}, Loss: {loss:.3f}")
 
 # Validate
-graph_embeddings = validate()
+output = validate_with_rmsd()
 tsne_validation(
-    graph_embeddings["embeddings"],
-    paint=graph_embeddings["rmsd"],
+    output["graph_embeddings"],
+    paint=output["rmsd"],
     paint_name="rmsd",
     epoch=epoch,
+    plot_dir=Path("./plot"),
+)
+tsne_validation(
+    output["node_embeddings"],
+    paint=output["node_labels"],
+    paint_name="node_labels",
+    epoch=epoch + 1,
     plot_dir=Path("./plot"),
 )
