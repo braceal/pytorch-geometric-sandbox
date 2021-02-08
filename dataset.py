@@ -2,8 +2,10 @@ import torch
 import h5py
 import numpy as np
 from pathlib import Path
-from typing import List, Tuple, Optional, Union
+from typing import List, Union
 from torch.utils.data import Dataset
+from torch_geometric.data import Data
+
 
 PathLike = Union[str, Path]
 
@@ -19,12 +21,11 @@ class ContactMapDataset(Dataset):
         path: PathLike,
         dataset_name: str,
         scalar_dset_names: List[str],
-        shape: Tuple[int, ...],
+        num_node_features: int,
         split_ptc: float = 0.8,
         split: str = "train",
         seed: int = 333,
         scalar_requires_grad: bool = False,
-        values_dset_name: Optional[str] = None,
     ):
         """
         Parameters
@@ -50,10 +51,6 @@ class ContactMapDataset(Dataset):
             Sets requires_grad torch.Tensor parameter for scalars specified by
             `scalar_dset_names`. Set to True, to use scalars for multi-task
             learning. If scalars are only required for plotting, then set it as False.
-        values_dset_name: str, optional
-            Name of HDF5 dataset field containing optional values of the entries
-            the distance/contact matrix. By default, values are all assumed to be 1
-            corresponding to a binary contact map and created on the fly.
         """
         if split not in ("train", "valid"):
             raise ValueError("Parameter split must be 'train' or 'valid'.")
@@ -64,9 +61,8 @@ class ContactMapDataset(Dataset):
         self.file_path = str(path)
         self.dataset_name = dataset_name
         self.scalar_dset_names = scalar_dset_names
-        self.shape = shape
+        self._num_node_features = num_node_features
         self._scalar_requires_grad = scalar_requires_grad
-        self._values_dset_name = values_dset_name
 
         # get lengths and paths
         with self._open_h5_file() as f:
@@ -97,8 +93,6 @@ class ContactMapDataset(Dataset):
         if not self._initialized:
             self._h5_file = self._open_h5_file()
             self.dset = self._h5_file[self.dataset_name]
-            if self._values_dset_name is not None:
-                self.val_dset = self._h5_file[self._values_dset_name]
             # Load scalar dsets
             self.scalar_dsets = {
                 name: self._h5_file[name] for name in self.scalar_dset_names
@@ -108,17 +102,15 @@ class ContactMapDataset(Dataset):
         # get real index
         index = self.indices[idx]
 
-        ind = self.dset[index, ...].reshape(2, -1)
-        indices = torch.from_numpy(ind).to(torch.long)
-        # Create array of 1s, all values in the contact map are 1. Or load values.
-        if self._values_dset_name is not None:
-            values = torch.from_numpy(self.val_dset[index, ...]).to(torch.float32)
-        else:
-            values = torch.ones(indices.shape[1], dtype=torch.float32)
-        # Set shape to the last 2 elements of self.shape.
-        # Handles (1, W, H) and (W, H)
-        data = torch.sparse.FloatTensor(indices, values, self.shape[-2:]).to_dense()
-        data = data.view(self.shape)
+        # Get adjacency list
+        edge_index = self.dset[index, ...].reshape(2, -1)  # [2, num_edges]
+        edge_index = torch.from_numpy(edge_index).to(torch.long)
+
+        # node features (contast)
+        x = np.ones((len(edge_index.shape[1]), self._num_node_features))
+
+        # Great graph data object
+        data = Data(x=x, edge_index=edge_index)
 
         sample = {"X": data}
         # Add index into dataset to sample
