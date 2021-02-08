@@ -115,8 +115,11 @@ def validate_with_rmsd():
 
     output = {key: np.array(val).squeeze() for key, val in output.items()}
 
-    print(output["node_embeddings"].shape)
-    print(output["node_labels"].shape)
+    shape = output["node_embeddings"].shape
+    output["node_embeddings"] = output["node_embeddings"].reshape(
+        shape[0] * shape[1], -1
+    )
+    output["node_labels"] = output["node_labels"].flatten()
 
     return output
 
@@ -134,9 +137,11 @@ tsne_validation(
     epoch=epoch,
     plot_dir=Path("./plot"),
 )
+
+random_sample = np.random.choice(len(output["node_embeddings"]), 8000, replace=False)
 tsne_validation(
-    output["node_embeddings"],
-    paint=output["node_labels"],
+    output["node_embeddings"][random_sample],
+    paint=output["node_labels"][random_sample],
     paint_name="node_labels",
     epoch=epoch + 1,
     plot_dir=Path("./plot"),
