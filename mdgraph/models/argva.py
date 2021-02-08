@@ -38,7 +38,7 @@ class Discriminator(nn.Module):
 num_features = 5
 path = Path(__file__).parent / "../../test/data/BBA-subset-100.h5"
 dataset = ContactMapDataset(path, "contact_map", ["rmsd"], num_features)
-loader = DataLoader(dataset, batch_size=32, shuffle=True)
+loader = DataLoader(dataset, batch_size=1, shuffle=True)
 
 # Models
 encoder = Encoder(num_features, hidden_channels=32, out_channels=32)
