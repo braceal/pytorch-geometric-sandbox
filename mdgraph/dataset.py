@@ -37,8 +37,8 @@ class ContactMapDataset(Dataset):
         scalar_dset_names : List[str]
             List of scalar dataset names inside HDF5 file to be passed
             to training logs.
-        shape : tuple
-            Shape of contact matrices (H, W), may be (1, H, W).
+        num_node_features : int
+            Number of node features.
         split_ptc : float
             Percentage of total data to be used as training set.
         split : str
