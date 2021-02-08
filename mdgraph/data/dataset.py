@@ -2,9 +2,10 @@ import torch
 import h5py
 import numpy as np
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, Optional
 from torch.utils.data import Dataset
 from torch_geometric.data import Data
+from mdgraph.data.preprocess import aminoacid_int_to_onehot
 
 
 PathLike = Union[str, Path]
@@ -21,7 +22,8 @@ class ContactMapDataset(Dataset):
         path: PathLike,
         dataset_name: str,
         scalar_dset_names: List[str],
-        num_node_features: int,
+        num_node_features: Optional[int],
+        node_feature_path: Optional[PathLike] = None,
         split_ptc: float = 0.8,
         split: str = "train",
         seed: int = 333,
@@ -64,6 +66,11 @@ class ContactMapDataset(Dataset):
         self._num_node_features = num_node_features
         self._scalar_requires_grad = scalar_requires_grad
 
+        # get node features
+        if node_feature_path is not None:
+            aa_labels = np.load(node_feature_path)
+            self.node_features = aminoacid_int_to_onehot(aa_labels)
+
         # get lengths and paths
         with self._open_h5_file() as f:
             self.len = len(f[self.dataset_name])
@@ -97,6 +104,7 @@ class ContactMapDataset(Dataset):
             self.scalar_dsets = {
                 name: self._h5_file[name] for name in self.scalar_dset_names
             }
+
             self._initialized = True
 
         # get real index
@@ -107,8 +115,11 @@ class ContactMapDataset(Dataset):
         edge_index = torch.from_numpy(edge_index).to(torch.long)
 
         # node features (contast)
-        num_nodes = int(edge_index.max().item()) + 1
-        x = torch.ones((num_nodes, self._num_node_features))
+        if self.node_features is None:
+            num_nodes = int(edge_index.max().item()) + 1
+            x = torch.ones((num_nodes, self._num_node_features))
+        else:
+            x = self.node_features
 
         # Great graph data object
         data = Data(x=x, edge_index=edge_index)
