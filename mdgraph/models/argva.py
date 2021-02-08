@@ -8,23 +8,23 @@ import torch.nn.functional as F
 from mdgraph.dataset import ContactMapDataset
 from torch_geometric.data import DataLoader
 from torch_geometric.nn import GCNConv, ARGVA
-from molecules.plot.tsne import compute_tsne, plot_tsne_plotly 
+from molecules.plot.tsne import compute_tsne, plot_tsne_plotly
 from plotly.io import to_html
+
 
 def tsne_validation(embeddings, paint, paint_name, epoch, plot_dir):
     print(f"t-SNE on input shape {embeddings.shape}")
     tsne_embeddings = compute_tsne(embeddings)
     fig = plot_tsne_plotly(
-        tsne_embeddings,
-        df_dict={paint_name: paint},
-        color=paint_name
+        tsne_embeddings, df_dict={paint_name: paint}, color=paint_name
     )
     html_string = to_html(fig)
     time_stamp = time.strftime(
-            f"t-SNE-plotly-{paint_name}-epoch-{epoch}-%Y%m%d-%H%M%S.html"
+        f"t-SNE-plotly-{paint_name}-epoch-{epoch}-%Y%m%d-%H%M%S.html"
     )
     with open(plot_dir.joinpath(time_stamp), "w") as f:
         f.write(html_string)
+
 
 class Encoder(nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels):
@@ -76,6 +76,7 @@ plot_interval = 3
 plot_dir = Path("./plot")
 plot_dir.mkdir()
 
+
 def train():
     train_loss = 0.0
     graph_embeddings = {"embeddings": [], "rmsd": []}
@@ -105,12 +106,10 @@ def train():
             graph_embeddings["embeddings"].append(emb)
             graph_embeddings["rmsd"].append(sample["rmsd"].detach().cpu().numpy())
 
-
     train_loss /= len(loader)
 
     graph_embeddings = {
-        key: np.array(val).squeeze() for key, val in
-        graph_embeddings.items()
+        key: np.array(val).squeeze() for key, val in graph_embeddings.items()
     }
 
     return train_loss, graph_embeddings
@@ -128,4 +127,3 @@ for epoch in range(1, 151):
         epoch=epoch,
         plot_dir=plot_dir,
     )
-    
