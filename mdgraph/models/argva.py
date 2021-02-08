@@ -1,12 +1,30 @@
+import time
 from pathlib import Path
-
+from tqdm import tqdm
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mdgraph.dataset import ContactMapDataset
 from torch_geometric.data import DataLoader
 from torch_geometric.nn import GCNConv, ARGVA
+from molecules.plot.tsne import compute_tsne, plot_tsne_plotly 
+from plotly.io import to_html
 
+def tsne_validation(embeddings, paint, paint_name, epoch, plot_dir):
+    print(f"t-SNE on input shape {embeddings.shape}")
+    tsne_embeddings = compute_tsne(embeddings)
+    fig = plot_tsne_plotly(
+        tsne_embeddings,
+        df_dict={paint_name: paint},
+        color=paint_name
+    )
+    html_string = to_html(fig)
+    time_stamp = time.strftime(
+            f"t-SNE-plotly-{paint_name}-epoch-{epoch}-%Y%m%d-%H%M%S.html"
+    )
+    with open(plot_dir.joinpath(time_stamp), "w") as f:
+        f.write(html_string)
 
 class Encoder(nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels):
@@ -41,8 +59,8 @@ dataset = ContactMapDataset(path, "contact_map", ["rmsd"], num_features)
 loader = DataLoader(dataset, batch_size=1, shuffle=True)
 
 # Models
-encoder = Encoder(num_features, hidden_channels=32, out_channels=32)
-discriminator = Discriminator(in_channels=32, hidden_channels=64, out_channels=32)
+encoder = Encoder(num_features, hidden_channels=32, out_channels=10)
+discriminator = Discriminator(in_channels=10, hidden_channels=64, out_channels=10)
 model = ARGVA(encoder, discriminator)
 
 # Hardware
@@ -53,10 +71,15 @@ model = model.to(device)
 discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=0.001)
 encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.005)
 
+# Evaluation
+plot_interval = 3
+plot_dir = Path("./plot")
+plot_dir.mkdir()
 
 def train():
     train_loss = 0.0
-    for sample in loader:
+    graph_embeddings = {"embeddings": [], "rmsd": []}
+    for i, sample in tqdm(enumerate(loader)):
         model.train()
         encoder_optimizer.zero_grad()
         data = sample["X"]
@@ -75,12 +98,34 @@ def train():
         loss.backward()
         encoder_optimizer.step()
         train_loss += loss.item()
+
+        # Collect embeddings for plot
+        if i % plot_interval == 0:
+            emb = z.detach().cpu().numpy().sum(axis=0)
+            graph_embeddings["embeddings"].append(emb)
+            graph_embeddings["rmsd"].append(sample["rmsd"].detach().cpu().numpy())
+
+
     train_loss /= len(loader)
-    return train_loss
+
+    graph_embeddings = {
+        key: np.array(val).squeeze() for key, val in
+        graph_embeddings.items()
+    }
+
+    return train_loss, graph_embeddings
 
 
 print(f"Traning on {len(loader)} examples")
 
 for epoch in range(1, 151):
-    loss = train()
+    loss, graph_embeddings = train()
     print(f"Epoch: {epoch:03d}, Loss: {loss:.3f}")
+    tsne_validation(
+        graph_embeddings["embeddings"],
+        paint=graph_embeddings["rmsd"],
+        paint_name="rmsd",
+        epoch=epoch,
+        plot_dir=plot_dir,
+    )
+    
