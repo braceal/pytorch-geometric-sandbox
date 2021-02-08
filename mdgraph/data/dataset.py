@@ -68,8 +68,8 @@ class ContactMapDataset(Dataset):
 
         # get node features
         if node_feature_path is not None:
-            aa_labels = np.load(node_feature_path)
-            self.node_features = aminoacid_int_to_onehot(aa_labels)
+            self.labels = np.load(node_feature_path)
+            self.node_features = aminoacid_int_to_onehot(self.labels)
 
         # get lengths and paths
         with self._open_h5_file() as f:
@@ -114,15 +114,17 @@ class ContactMapDataset(Dataset):
         edge_index = self.dset[index, ...].reshape(2, -1)  # [2, num_edges]
         edge_index = torch.from_numpy(edge_index).to(torch.long)
 
-        # node features (contast)
+        # node features (contast all ones)
         if self.node_features is None:
             num_nodes = int(edge_index.max().item()) + 1
             x = torch.ones((num_nodes, self._num_node_features))
+            y = None
         else:
             x = self.node_features
+            y = self.labels
 
         # Great graph data object
-        data = Data(x=x, edge_index=edge_index)
+        data = Data(x=x, edge_index=edge_index, y=y)
 
         sample = {"X": data}
         # Add index into dataset to sample
