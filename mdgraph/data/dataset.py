@@ -22,7 +22,7 @@ class ContactMapDataset(Dataset):
         path: PathLike,
         dataset_name: str,
         scalar_dset_names: List[str],
-        num_node_features: Optional[int],
+        num_node_features: Optional[int] = None,
         node_feature_path: Optional[PathLike] = None,
         split_ptc: float = 0.8,
         split: str = "train",
