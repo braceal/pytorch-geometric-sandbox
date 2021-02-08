@@ -54,7 +54,10 @@ class Discriminator(nn.Module):
 
 # Data
 path = Path(__file__).parent / "../../test/data/BBA-subset-100.h5"
-dataset = ContactMapDataset(path, "contact_map", ["rmsd"], 5)
+node_feature_path = Path(__file__).parent / "onehot_bba_amino_acid_labels.npy"
+dataset = ContactMapDataset(
+    path, "contact_map", ["rmsd"], node_feature_path=node_feature_path
+)
 data = dataset[0]["X"]
 loader = DataLoader(dataset, batch_size=1, shuffle=True)
 
