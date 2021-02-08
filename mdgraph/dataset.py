@@ -107,7 +107,7 @@ class ContactMapDataset(Dataset):
         edge_index = torch.from_numpy(edge_index).to(torch.long)
 
         # node features (contast)
-        x = np.ones((edge_index.shape[1], self._num_node_features))
+        x = torch.ones((edge_index.shape[1], self._num_node_features))
 
         # Great graph data object
         data = Data(x=x, edge_index=edge_index)
