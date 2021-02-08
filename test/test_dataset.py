@@ -1,4 +1,5 @@
 from pathlib import Path
+import numpy as np
 from mdgraph.dataset import ContactMapDataset
 
 
@@ -18,4 +19,4 @@ def test_dataloader():
     dataset = ContactMapDataset(TEST_DATA_PATH, "contact_map", ["rmsd"], 5)
     loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
-    assert len(loader) == len(dataset) // 32
+    assert len(loader) == np.ceil(len(dataset) / 32)
