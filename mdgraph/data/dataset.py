@@ -71,7 +71,7 @@ class ContactMapDataset(Dataset):
             self.labels = np.load(node_feature_path)
             self.node_features = aminoacid_int_to_onehot(self.labels)
             self.labels = torch.from_numpy(self.labels).to(torch.long)
-            self.node_features = torch.from_numpy(self.node_features)
+            self.node_features = torch.from_numpy(self.node_features).to(torch.float32)
         else:
             self.node_features, self.labels = None, None
 

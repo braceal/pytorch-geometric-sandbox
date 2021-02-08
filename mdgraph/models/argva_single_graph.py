@@ -54,7 +54,7 @@ class Discriminator(nn.Module):
 
 # Data
 path = Path(__file__).parent / "../../test/data/BBA-subset-100.h5"
-node_feature_path = Path(__file__).parent / "onehot_bba_amino_acid_labels.npy"
+node_feature_path = Path(__file__).parent / "../../test/data/onehot_bba_amino_acid_labels.npy"
 dataset = ContactMapDataset(
     path, "contact_map", ["rmsd"], node_feature_path=node_feature_path
 )
@@ -62,8 +62,8 @@ data = dataset[0]["X"]
 loader = DataLoader(dataset, batch_size=1, shuffle=True)
 
 # Models
-encoder = Encoder(data.num_features, hidden_channels=32, out_channels=32)
-discriminator = Discriminator(in_channels=32, hidden_channels=64, out_channels=32)
+encoder = Encoder(data.num_features, hidden_channels=32, out_channels=10)
+discriminator = Discriminator(in_channels=10, hidden_channels=64, out_channels=10)
 model = ARGVA(encoder, discriminator)
 
 # Hardware
