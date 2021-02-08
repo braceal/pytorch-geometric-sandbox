@@ -10,6 +10,7 @@ from torch_geometric.nn import GCNConv, ARGVA
 from torch_geometric.data import DataLoader
 from molecules.plot.tsne import compute_tsne, plot_tsne_plotly
 from plotly.io import to_html
+from collections import defaultdict
 
 
 def tsne_validation(embeddings, paint, paint_name, epoch, plot_dir):
@@ -98,7 +99,7 @@ def train():
 
 def validate_with_rmsd():
     model.eval()
-    output = {"embeddings": [], "rmsd": []}
+    output = defaultdict(list)
     with torch.no_grad():
         for sample in tqdm(loader):
             data = sample["X"]
