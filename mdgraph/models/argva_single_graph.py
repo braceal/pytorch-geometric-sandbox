@@ -81,7 +81,11 @@ encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=0.005)
 def train():
     model.train()
     encoder_optimizer.zero_grad()
-    z = model.encode(data.x, data.edge_index)
+
+    num_nodes = int(data.edge_index.max().item()) + 1
+    x = torch.ones((num_nodes, 13))
+    x = x.to(device)
+    z = model.encode(x, data.edge_index)
 
     for _ in range(5):
         discriminator.train()
@@ -104,7 +108,12 @@ def validate_with_rmsd():
         for sample in tqdm(loader):
             data = sample["X"]
             data = data.to(device)
-            z = model.encode(data.x, data.edge_index)
+            
+            num_nodes = int(data.edge_index.max().item()) + 1
+            x = torch.ones((num_nodes, 13))
+            x = x.to(device)
+
+            z = model.encode(x, data.edge_index)
 
             # Collect embeddings for plot
             emb = z.detach().cpu().numpy()
@@ -130,13 +139,13 @@ for epoch in range(1, 151):
 
 # Validate
 output = validate_with_rmsd()
-tsne_validation(
-    output["graph_embeddings"],
-    paint=output["rmsd"],
-    paint_name="rmsd",
-    epoch=epoch,
-    plot_dir=Path("./plot"),
-)
+#tsne_validation(
+#    output["graph_embeddings"],
+#    paint=output["rmsd"],
+#    paint_name="rmsd",
+#    epoch=epoch,
+#    plot_dir=Path("./plot"),
+#)
 
 random_sample = np.random.choice(len(output["node_embeddings"]), 8000, replace=False)
 tsne_validation(
