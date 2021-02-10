@@ -14,7 +14,12 @@ parser.add_argument("--variational", action="store_true")
 parser.add_argument("--linear", action="store_true")
 parser.add_argument("--epochs", type=int, default=400)
 parser.add_argument("--name", type=str)
+parser.add_argument("--constant", action="store_true")
 args = parser.parse_args()
+
+print("variational:",args.variational)
+print("linear:", args.linear)
+print("constant:", args.constant)
 
 
 class GCNEncoder(torch.nn.Module):
@@ -97,6 +102,14 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 def train():
     model.train()
     optimizer.zero_grad()
+
+    if args.constant:
+        num_nodes = int(data.edge_index.max().item()) + 1
+        x = torch.ones((num_nodes, num_features))
+        x = x.to(device)
+    else:
+        x = data.x
+
     z = model.encode(data.x, data.edge_index)
     loss = model.recon_loss(z, data.edge_index)
     if args.variational:
@@ -114,9 +127,12 @@ def validate_with_rmsd():
             data = sample["X"]
             data = data.to(device)
 
-            num_nodes = int(data.edge_index.max().item()) + 1
-            x = torch.ones((num_nodes, 13))
-            x = x.to(device)
+            if args.constant:
+                num_nodes = int(data.edge_index.max().item()) + 1
+                x = torch.ones((num_nodes, num_features))
+                x = x.to(device)
+            else:
+                x = data.x
 
             z = model.encode(x, data.edge_index)
 
@@ -140,7 +156,7 @@ def validate_with_rmsd():
 
 for epoch in range(1, args.epochs + 1):
     loss = train()
-    print(f"Epoch: {epoch:03d}\tLoss: {loss:05d}")
+    print(f"Epoch: {epoch:03d}\tLoss: {loss}")
 
 # Validate
 output = validate_with_rmsd()
