@@ -1,5 +1,7 @@
 # pytorch-geometric-sandbox
 
+Preliminary modeling of molecular dynamics protein trajectories using [pytorch_geometric](https://github.com/rusty1s/pytorch_geometric).
+
 # Installation
 ```
 python3 -m venv env
@@ -14,3 +16,12 @@ pip install --no-index torch-spline-conv -f https://pytorch-geometric.com/whl/to
 pip install torch-geometric
 pip install -e .
 ```
+
+# Run
+```
+python mdgraph/models/<model-name>.py
+```
+See inside specific model py file for any additional command line options.
+
+# Viewing results
+Check in the `plot/` directory for example html files that can be viewed in the browser.
