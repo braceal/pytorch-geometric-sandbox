@@ -22,3 +22,6 @@ pip install -e .
 python mdgraph/models/<model-name>.py
 ```
 See inside specific model py file for any additional command line options.
+
+# Viewing results
+Check in the `plot/` directory for example html files that can be viewed in the browser.
