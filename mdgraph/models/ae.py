@@ -17,7 +17,7 @@ parser.add_argument("--name", type=str)
 parser.add_argument("--constant", action="store_true")
 args = parser.parse_args()
 
-print("variational:",args.variational)
+print("variational:", args.variational)
 print("linear:", args.linear)
 print("constant:", args.constant)
 
