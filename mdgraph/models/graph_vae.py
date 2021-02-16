@@ -298,15 +298,22 @@ def train():
 
         # Get NxD node embedding matrix
         node_z = node_ae.encode(data.x, data.edge_index)
+        print("node_z shape:", node_z.shape)
         # Get graph embedding
         graph_z, mu, logstd, xs, edge_indices, edge_weights, perms = encoder(
             node_z, data.edge_index
         )
+        print("graph_z shape:", graph_z.shape)
         # Reconstruct node embedding matrix
         node_z_recon = decoder(graph_z, xs, edge_indices, edge_weights, perms)
+        print("node_z_recon shape:", node_z_recon.shape)
 
-        loss = node_ae.recon_loss(node_z_recon, data.edge_index)
-        loss = loss + (1 / data.num_nodes) * kl_loss(mu, logstd)
+        recon_loss = node_ae.recon_loss(node_z_recon, data.edge_index)
+        print("recon_loss:", recon_loss)
+        kld_loss = (1 / data.num_nodes) * kl_loss(mu, logstd)
+        print("kld loss:", kld_loss)
+        print("data.num_nodes:", data.num_nodes)
+        loss = recon_loss + kld_loss
         loss.backward()
         optimizer.step()
         train_loss += loss.item()
