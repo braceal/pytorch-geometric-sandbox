@@ -8,10 +8,13 @@ from torch_geometric.utils import add_self_loops, sort_edge_index, remove_self_l
 from torch_geometric.utils.repeat import repeat
 
 import argparse
+import numpy as np
 from tqdm import tqdm
 from pathlib import Path
+from collections import defaultdict
 from mdgraph.data.dataset import ContactMapDataset
 from torch_geometric.data import DataLoader
+from mdgraph.utils import tsne_validation
 
 MAX_LOGSTD = 10
 
@@ -199,7 +202,9 @@ class VariationalGraphDecoder(nn.Module):
         self.projection_conv = GCNConv(in_channels, hidden_channels, improved=True)
         self.up_convs = nn.ModuleList()
         for i in range(depth - 1):
-            self.up_convs.append(GCNConv(hidden_channels, hidden_channels, improved=True))
+            self.up_convs.append(
+                GCNConv(hidden_channels, hidden_channels, improved=True)
+            )
         self.up_convs.append(GCNConv(hidden_channels, out_channels, improved=True))
 
         self.reset_parameters()
@@ -224,8 +229,8 @@ class VariationalGraphDecoder(nn.Module):
             perm = perms[j]
 
             up = torch.zeros_like(res)
-            #print("up.shape:", up.shape)
-            #print("x.shape:", x.shape)
+            # print("up.shape:", up.shape)
+            # print("x.shape:", x.shape)
             up[perm] = x
             x = res + up if self.sum_res else torch.cat((res, up), dim=-1)
 
@@ -238,6 +243,7 @@ class VariationalGraphDecoder(nn.Module):
 parser = argparse.ArgumentParser()
 parser.add_argument("--linear", action="store_true")
 parser.add_argument("--epochs", type=int, default=400)
+parser.add_argument("--name", type=str)
 args = parser.parse_args()
 
 # Architecture Hyperparameters
@@ -303,21 +309,30 @@ def train():
 
         # Get NxD node embedding matrix
         node_z = node_ae.encode(data.x, data.edge_index)
-        #print("node_z shape:", node_z.shape)
+        # print("node_z shape:", node_z.shape)
         # Get graph embedding
-        graph_z, mu, logstd, edge_index, xs, edge_indices, edge_weights, perms = encoder(
-            node_z, data.edge_index
-        )
-        #print("graph_z shape:", graph_z.shape)
+        (
+            graph_z,
+            mu,
+            logstd,
+            edge_index,
+            xs,
+            edge_indices,
+            edge_weights,
+            perms,
+        ) = encoder(node_z, data.edge_index)
+        # print("graph_z shape:", graph_z.shape)
         # Reconstruct node embedding matrix
-        node_z_recon = decoder(graph_z, edge_index, xs, edge_indices, edge_weights, perms)
-        #print("node_z_recon shape:", node_z_recon.shape)
+        node_z_recon = decoder(
+            graph_z, edge_index, xs, edge_indices, edge_weights, perms
+        )
+        # print("node_z_recon shape:", node_z_recon.shape)
 
         recon_loss = node_ae.recon_loss(node_z_recon, data.edge_index)
-        #print("recon_loss:", recon_loss)
+        # print("recon_loss:", recon_loss)
         kld_loss = kl_loss(mu, logstd)
-        #print("kld loss:", kld_loss)
-        #print("data.num_nodes:", data.num_nodes)
+        # print("kld loss:", kld_loss)
+        # print("data.num_nodes:", data.num_nodes)
         loss = recon_loss + kld_loss
         loss.backward()
         optimizer.step()
@@ -326,6 +341,72 @@ def train():
     return train_loss
 
 
+def validate_with_rmsd():
+    node_ae.eval()
+    encoder.eval()
+
+    output = defaultdict(list)
+    with torch.no_grad():
+        for sample in tqdm(loader):
+            data = sample["X"]
+            data = data.to(device)
+
+            node_z = node_ae.encode(data.x, data.edge_index)
+            graph_z, *_ = encoder(node_z, data.edge_index)
+
+            # Collect embeddings for plot
+            node_emb = node_z.detach().cpu().numpy()
+            graph_emb = graph_z.detach().cpu().numpy()
+            output["graph_embeddings"].append(graph_emb)
+            output["node_embeddings"].append(node_emb)
+            output["node_labels"].append(data.y.detach().cpu().numpy())
+            output["rmsd"].append(sample["rmsd"].detach().cpu().numpy())
+
+    output = {key: np.array(val).squeeze() for key, val in output.items()}
+
+    shape = output["node_embeddings"].shape
+    output["node_embeddings"] = output["node_embeddings"].reshape(
+        shape[0] * shape[1], -1
+    )
+    output["node_labels"] = output["node_labels"].flatten()
+
+    return output
+
+
+def validate(epoch: int):
+
+    output = validate_with_rmsd()
+
+    print("graph_embeddings.shape:", output["graph_embeddings"].shape)
+    print("node_embeddings.shape:", output["node_embeddings"].shape)
+    print("rmsd.shape:", output["rmsd"].shape)
+
+    # Paint graph embeddings
+    random_sample = np.random.choice(
+        len(output["graph_embeddings"]), 8000, replace=False
+    )
+    tsne_validation(
+        embeddings=output["graph_embeddings"][random_sample],
+        paint=output["rmsd"][random_sample],
+        paint_name="rmsd",
+        plot_dir=Path("./test_plots"),
+        plot_name=f"epoch-{epoch}-graph_embeddings",
+    )
+
+    # Paint node embeddings
+    random_sample = np.random.choice(
+        len(output["node_embeddings"]), 8000, replace=False
+    )
+    tsne_validation(
+        embeddings=output["node_embeddings"][random_sample],
+        paint=output["node_labels"][random_sample],
+        paint_name="node_labels",
+        plot_dir=Path("./test_plots"),
+        plot_name=f"epoch-{epoch}-node_embeddings",
+    )
+
+
 for epoch in range(1, args.epochs + 1):
     loss = train()
     print(f"Epoch: {epoch:03d}\tLoss: {loss}")
+    validate(epoch)
