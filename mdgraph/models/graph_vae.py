@@ -90,12 +90,14 @@ class VariationalGraphEncoder(nn.Module):
         depth: int = 1,
         pool_ratios: float = 0.5,
         act=F.relu,
+        variational: bool = True,
     ):
         super(VariationalGraphEncoder, self).__init__()
         assert depth >= 1
         self.depth = depth
         self.pool_ratios = repeat(pool_ratios, depth)
         self.act = act
+        self.variational = variational
 
         self.down_convs = nn.ModuleList()
         self.pools = nn.ModuleList()
@@ -107,7 +109,8 @@ class VariationalGraphEncoder(nn.Module):
             )
 
         self.conv_mu = GCNConv(hidden_channels, out_channels)
-        self.conv_logstd = GCNConv(hidden_channels, out_channels)
+        if self.variational:
+            self.conv_logstd = GCNConv(hidden_channels, out_channels)
 
         self.reset_parameters()
 
@@ -117,15 +120,20 @@ class VariationalGraphEncoder(nn.Module):
         for pool in self.pools:
             pool.reset_parameters()
         self.conv_mu.reset_parameters()
-        self.conv_logstd.reset_parameters()
+        if self.variational:
+            self.conv_logstd.reset_parameters()
 
     def forward(self, x, edge_index, batch=None):
         x, edge_index, xs, edge_indices, edge_weights, perms = self.down_sample(
             x, edge_index, batch
         )
         mu = self.conv_mu(x, edge_index)
-        logstd = self.conv_logstd(x, edge_index)
-        z = reparametrize(mu, logstd, training=self.training)
+        if self.variational:
+            logstd = self.conv_logstd(x, edge_index)
+            z = reparametrize(mu, logstd, training=self.training)
+        else:
+            z = mu
+            logstd = None
         return z, mu, logstd, edge_index, xs, edge_indices, edge_weights, perms
 
     def down_sample(self, x, edge_index, batch=None):
@@ -255,12 +263,15 @@ depth = 2
 pool_ratios = 0.5
 act = F.relu
 sum_res = True
+variational = False
 
 path = Path(__file__).parent / "../../test/data/BBA-subset-100.h5"
 node_feature_path = (
     Path(__file__).parent / "../../test/data/onehot_bba_amino_acid_labels.npy"
 )
-dataset = ContactMapDataset(path, "contact_map", ["rmsd"], node_feature_path=node_feature_path)
+dataset = ContactMapDataset(
+    path, "contact_map", ["rmsd"], node_feature_path=node_feature_path
+)
 loader = DataLoader(dataset, batch_size=1, shuffle=True)
 
 # Select node AE
@@ -277,6 +288,7 @@ encoder = VariationalGraphEncoder(
     depth,
     pool_ratios,
     act,
+    variational,
 )
 decoder = VariationalGraphDecoder(
     graph_out_channels,
@@ -331,12 +343,13 @@ def train():
         )
         # print("node_z_recon shape:", node_z_recon.shape)
 
-        recon_loss = node_ae.recon_loss(node_z_recon, data.edge_index)
+        loss = node_ae.recon_loss(node_z_recon, data.edge_index)
         # print("recon_loss:", recon_loss)
-        kld_loss = kl_loss(mu, logstd)
+        if variational:
+            kld_loss = kl_loss(mu, logstd)
+            loss += kld_loss
         # print("kld loss:", kld_loss)
         # print("data.num_nodes:", data.num_nodes)
-        loss = recon_loss + kld_loss
         loss.backward()
         optimizer.step()
         train_loss += loss.item()
