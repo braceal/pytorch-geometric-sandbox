@@ -123,7 +123,7 @@ class VariationalGraphEncoder(nn.Module):
         mu = self.conv_mu(x, edge_index)
         logstd = self.conv_logstd(x, edge_index)
         z = reparametrize(mu, logstd, training=self.training)
-        return z, mu, logstd, xs, edge_indices, edge_weights, perms
+        return z, mu, logstd, edge_index, xs, edge_indices, edge_weights, perms
 
     def down_sample(self, x, edge_index, batch=None):
         if batch is None:
@@ -196,18 +196,21 @@ class VariationalGraphDecoder(nn.Module):
         self.sum_res = sum_res
         self.act = act
 
+        self.projection_conv = GCNConv(in_channels, hidden_channels, improved=True)
         self.up_convs = nn.ModuleList()
         for i in range(depth - 1):
-            self.up_convs.append(GCNConv(in_channels, hidden_channels, improved=True))
-        self.up_convs.append(GCNConv(in_channels, out_channels, improved=True))
+            self.up_convs.append(GCNConv(hidden_channels, hidden_channels, improved=True))
+        self.up_convs.append(GCNConv(hidden_channels, out_channels, improved=True))
 
         self.reset_parameters()
 
     def reset_parameters(self):
+        self.projection_conv.reset_parameters()
         for conv in self.up_convs:
             conv.reset_parameters()
 
-    def forward(self, x, xs, edge_indices, edge_weights, perms):
+    def forward(self, x, edge_index, xs, edge_indices, edge_weights, perms):
+        x = self.projection_conv(x, edge_index)
         x = self.up_sample(x, xs, edge_indices, edge_weights, perms)
         return x
 
@@ -221,6 +224,8 @@ class VariationalGraphDecoder(nn.Module):
             perm = perms[j]
 
             up = torch.zeros_like(res)
+            #print("up.shape:", up.shape)
+            #print("x.shape:", x.shape)
             up[perm] = x
             x = res + up if self.sum_res else torch.cat((res, up), dim=-1)
 
@@ -238,7 +243,7 @@ args = parser.parse_args()
 # Architecture Hyperparameters
 num_features = 5
 node_out_channels = 10
-graph_out_channels = 10
+graph_out_channels = 1
 hidden_channels = 10
 depth = 2
 pool_ratios = 0.5
@@ -298,21 +303,21 @@ def train():
 
         # Get NxD node embedding matrix
         node_z = node_ae.encode(data.x, data.edge_index)
-        print("node_z shape:", node_z.shape)
+        #print("node_z shape:", node_z.shape)
         # Get graph embedding
-        graph_z, mu, logstd, xs, edge_indices, edge_weights, perms = encoder(
+        graph_z, mu, logstd, edge_index, xs, edge_indices, edge_weights, perms = encoder(
             node_z, data.edge_index
         )
-        print("graph_z shape:", graph_z.shape)
+        #print("graph_z shape:", graph_z.shape)
         # Reconstruct node embedding matrix
-        node_z_recon = decoder(graph_z, xs, edge_indices, edge_weights, perms)
-        print("node_z_recon shape:", node_z_recon.shape)
+        node_z_recon = decoder(graph_z, edge_index, xs, edge_indices, edge_weights, perms)
+        #print("node_z_recon shape:", node_z_recon.shape)
 
         recon_loss = node_ae.recon_loss(node_z_recon, data.edge_index)
-        print("recon_loss:", recon_loss)
-        kld_loss = (1 / data.num_nodes) * kl_loss(mu, logstd)
-        print("kld loss:", kld_loss)
-        print("data.num_nodes:", data.num_nodes)
+        #print("recon_loss:", recon_loss)
+        kld_loss = kl_loss(mu, logstd)
+        #print("kld loss:", kld_loss)
+        #print("data.num_nodes:", data.num_nodes)
         loss = recon_loss + kld_loss
         loss.backward()
         optimizer.step()
