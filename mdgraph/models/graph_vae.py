@@ -247,7 +247,7 @@ parser.add_argument("--name", type=str)
 args = parser.parse_args()
 
 # Architecture Hyperparameters
-num_features = 5
+num_features = 13
 node_out_channels = 10
 graph_out_channels = 1
 hidden_channels = 10
@@ -257,7 +257,10 @@ act = F.relu
 sum_res = True
 
 path = Path(__file__).parent / "../../test/data/BBA-subset-100.h5"
-dataset = ContactMapDataset(path, "contact_map", ["rmsd"], num_features)
+node_feature_path = (
+    Path(__file__).parent / "../../test/data/onehot_bba_amino_acid_labels.npy"
+)
+dataset = ContactMapDataset(path, "contact_map", ["rmsd"], node_feature_path=node_feature_path)
 loader = DataLoader(dataset, batch_size=1, shuffle=True)
 
 # Select node AE
@@ -337,6 +340,8 @@ def train():
         loss.backward()
         optimizer.step()
         train_loss += loss.item()
+
+    train_loss /= len(loader)
 
     return train_loss
 
