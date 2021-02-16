@@ -7,9 +7,11 @@ from torch_geometric.nn import TopKPooling, GCNConv, GAE
 from torch_geometric.utils import add_self_loops, sort_edge_index, remove_self_loops
 from torch_geometric.utils.repeat import repeat
 
+import time
 import argparse
 import numpy as np
-from tqdm import tqdm
+
+# from tqdm import tqdm
 from pathlib import Path
 from collections import defaultdict
 from mdgraph.data.dataset import ContactMapDataset
@@ -317,7 +319,7 @@ def train():
     decoder.train()
 
     train_loss = 0.0
-    for i, sample in tqdm(enumerate(loader)):
+    for i, sample in enumerate(loader):
         optimizer.zero_grad()
         data = sample["X"]
         data = data.to(device)
@@ -365,7 +367,7 @@ def validate_with_rmsd():
 
     output = defaultdict(list)
     with torch.no_grad():
-        for sample in tqdm(loader):
+        for sample in loader:
             data = sample["X"]
             data = data.to(device)
 
@@ -425,6 +427,9 @@ def validate(epoch: int):
 
 
 for epoch in range(1, args.epochs + 1):
+    start = time.time()
     loss = train()
-    print(f"Epoch: {epoch:03d}\tLoss: {loss}")
+    print(f"Epoch: {epoch:03d}\tLoss: {loss}\t Time: {time.time() - start}")
+    start = time.time()
     validate(epoch)
+    print(f"validation time: {time.time() - start}")
