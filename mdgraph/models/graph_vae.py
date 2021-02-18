@@ -60,7 +60,7 @@ class GINLayer(nn.Module):
         seq = nn.Sequential(
             nn.Linear(in_channels, out_channels),
             nn.ReLU(),
-            nn.Linear(out_channels, out_channels)
+            nn.Linear(out_channels, out_channels),
         )
         self.conv = GINConv(seq)
         self.bn = nn.BatchNorm1d(out_channels)
@@ -108,6 +108,7 @@ class GCNEncoder(nn.Module):
         x = self.conv1(x, edge_index).relu()
         return self.conv2(x, edge_index)
 
+
 class VariationalGCNEncoder(torch.nn.Module):
     def __init__(self, in_channels, out_channels):
         super(VariationalGCNEncoder, self).__init__()
@@ -118,6 +119,7 @@ class VariationalGCNEncoder(torch.nn.Module):
     def forward(self, x, edge_index):
         x = self.conv1(x, edge_index).relu()
         return self.conv_mu(x, edge_index), self.conv_logstd(x, edge_index)
+
 
 class VariationalGraphEncoder(nn.Module):
     """Acts on NxD node embedding matrix."""
@@ -252,8 +254,12 @@ class VariationalGraphDecoder(nn.Module):
         self.act = act
 
         # Before GIN, it was using GCNConv with improved=True
-        self.projection_conv1 = generate_conv(in_channels, hidden_channels // 2, use_gin)
-        self.projection_conv2 = generate_conv(hidden_channels // 2, hidden_channels, use_gin)
+        self.projection_conv1 = generate_conv(
+            in_channels, hidden_channels // 2, use_gin
+        )
+        self.projection_conv2 = generate_conv(
+            hidden_channels // 2, hidden_channels, use_gin
+        )
         self.up_convs = nn.ModuleList()
         for i in range(depth - 1):
             self.up_convs.append(
@@ -288,7 +294,7 @@ class VariationalGraphDecoder(nn.Module):
             # print("up.shape:", up.shape)
             # print("x.shape:", x.shape)
             up[perm] = x
-            #x = res + up if self.sum_res else torch.cat((res, up), dim=-1)
+            # x = res + up if self.sum_res else torch.cat((res, up), dim=-1)
             x = up
             x = self.up_convs[i](x, edge_index, edge_weight)
             x = self.act(x) if i < self.depth - 1 else x
@@ -398,13 +404,15 @@ def train():
             graph_z, edge_index, xs, edge_indices, edge_weights, perms
         )
         # print("node_z_recon shape:", node_z_recon.shape)
-        
+
         # Adjacency matrix reconstruction
         loss = node_ae.recon_loss(node_z_recon, data.edge_index)
-        #print("node_ae rec loss:",loss)
+        # print("node_ae rec loss:",loss)
         # Node embedding reconstruction
-        rec_loss = node_recon_loss_weight * node_emb_recon_criterion(node_z, node_z_recon)
-        #print("rec_loss:",rec_loss)
+        rec_loss = node_recon_loss_weight * node_emb_recon_criterion(
+            node_z, node_z_recon
+        )
+        # print("rec_loss:",rec_loss)
         loss += rec_loss
         if not args.linear:
             loss += (1 / data.num_nodes) * node_ae.kl_loss()
@@ -420,7 +428,9 @@ def train():
         train_loss += loss.item()
 
         if i % 100 == 0:
-            print(f"Training {i}/{len(loader)}. Loss: {train_loss / (i + 1)} Batch time: {time.time() - start}")
+            print(
+                f"Training {i}/{len(loader)}. Loss: {train_loss / (i + 1)} Batch time: {time.time() - start}"
+            )
 
     train_loss /= len(loader)
 
@@ -439,11 +449,19 @@ def validate_with_rmsd():
             data = data.to(device)
 
             node_z = node_ae.encode(data.x, data.edge_index)
-            graph_z, mu, logstd, edge_index, xs, edge_indices, edge_weights, perms = encoder(node_z, data.edge_index)
+            (
+                graph_z,
+                mu,
+                logstd,
+                edge_index,
+                xs,
+                edge_indices,
+                edge_weights,
+                perms,
+            ) = encoder(node_z, data.edge_index)
             node_z_recon = decoder(
                 graph_z, edge_index, xs, edge_indices, edge_weights, perms
             )
-
 
             # Collect embeddings for plot
             node_emb = node_z.detach().cpu().numpy()
@@ -459,10 +477,8 @@ def validate_with_rmsd():
 
     shape = output["node_embeddings"].shape
     for name in ["node_embeddings", "node_recon_embeddings"]:
-        output[name] = output[name].reshape(
-            shape[0] * shape[1], -1
-        )
-    
+        output[name] = output[name].reshape(shape[0] * shape[1], -1)
+
     output["node_labels"] = output["node_labels"].flatten()
 
     return output
