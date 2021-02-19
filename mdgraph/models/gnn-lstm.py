@@ -277,7 +277,7 @@ def train():
         if args.variational:
             loss = loss + (1 / data.num_nodes) * node_ae.kl_loss()
 
-        graph_emb, node_z_recon = lstm_ae(node_z)
+        graph_emb, node_z_recon = lstm_ae(node_z.view(1, *node_z.shape))
         print(graph_emb.shape)
         print(node_z_recon.shape)
 
