@@ -1,3 +1,4 @@
+import time
 import argparse
 from pathlib import Path
 import numpy as np
@@ -253,23 +254,38 @@ optimizer = torch.optim.Adam(node_ae.parameters(), lr=0.01)
 
 def train():
     node_ae.train()
-    optimizer.zero_grad()
 
-    if args.constant:
-        num_nodes = int(data.edge_index.max().item()) + 1
-        x = torch.ones((num_nodes, num_features))
-        x = x.to(device)
-    else:
-        x = data.x
+    train_loss = 0.0
+    for i, sample in enumerate(loader):
+        start = time.time()
+        optimizer.zero_grad()
+        data = sample["X"]
+        data = data.to(device)
 
-    z = node_ae.encode(data.x, data.edge_index)
-    loss = node_ae.recon_loss(z, data.edge_index)
-    if args.variational:
-        loss = loss + (1 / data.num_nodes) * node_ae.kl_loss()
+        if args.constant:
+            num_nodes = int(data.edge_index.max().item()) + 1
+            x = torch.ones((num_nodes, num_features))
+            x = x.to(device)
+        else:
+            x = data.x
 
-    loss.backward()
-    optimizer.step()
-    return float(loss)
+        z = node_ae.encode(data.x, data.edge_index)
+        loss = node_ae.recon_loss(z, data.edge_index)
+        if args.variational:
+            loss = loss + (1 / data.num_nodes) * node_ae.kl_loss()
+
+        loss.backward()
+        optimizer.step()
+        train_loss += loss.item()
+
+        if i % 100 == 0:
+            print(
+                f"Training {i}/{len(loader)}. Loss: {train_loss / (i + 1)} Batch time: {time.time() - start}"
+            )
+
+    train_loss /= len(loader)
+
+    return train_loss
 
 
 def validate_with_rmsd():
