@@ -251,6 +251,9 @@ node_ae, lstm_ae, data = node_ae.to(device), lstm_ae.to(device), data.to(device)
 # Optimizer
 optimizer = torch.optim.Adam(node_ae.parameters(), lr=0.01)
 
+# Criterion
+node_emb_recon_criterion = nn.MSELoss()
+
 
 def train():
     node_ae.train()
@@ -269,10 +272,16 @@ def train():
         else:
             x = data.x
 
-        z = node_ae.encode(data.x, data.edge_index)
-        loss = node_ae.recon_loss(z, data.edge_index)
+        node_z = node_ae.encode(data.x, data.edge_index)
+        loss = node_ae.recon_loss(node_z, data.edge_index)
         if args.variational:
             loss = loss + (1 / data.num_nodes) * node_ae.kl_loss()
+
+        graph_emb, node_z_recon = lstm_ae(node_z)
+        print(graph_emb.shape)
+        print(node_z_recon.shape)
+
+        loss += node_emb_recon_criterion(node_z, node_z_recon)
 
         loss.backward()
         optimizer.step()
