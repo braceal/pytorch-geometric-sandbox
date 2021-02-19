@@ -3,7 +3,9 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
+from typing import Tuple
 import torch
+from torch import nn
 from torch_geometric.nn import GCNConv, GAE, VGAE
 from torch_geometric.data import DataLoader
 from mdgraph.data.dataset import ContactMapDataset
@@ -22,7 +24,7 @@ print("linear:", args.linear)
 print("constant:", args.constant)
 
 
-class GCNEncoder(torch.nn.Module):
+class GCNEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(GCNEncoder, self).__init__()
         self.conv1 = GCNConv(in_channels, 2 * out_channels)
@@ -33,7 +35,7 @@ class GCNEncoder(torch.nn.Module):
         return self.conv2(x, edge_index)
 
 
-class VariationalGCNEncoder(torch.nn.Module):
+class VariationalGCNEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(VariationalGCNEncoder, self).__init__()
         self.conv1 = GCNConv(in_channels, 2 * out_channels)
@@ -45,7 +47,7 @@ class VariationalGCNEncoder(torch.nn.Module):
         return self.conv_mu(x, edge_index), self.conv_logstd(x, edge_index)
 
 
-class LinearEncoder(torch.nn.Module):
+class LinearEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(LinearEncoder, self).__init__()
         self.conv = GCNConv(in_channels, out_channels)
@@ -54,7 +56,7 @@ class LinearEncoder(torch.nn.Module):
         return self.conv(x, edge_index)
 
 
-class VariationalLinearEncoder(torch.nn.Module):
+class VariationalLinearEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(VariationalLinearEncoder, self).__init__()
         self.conv_mu = GCNConv(in_channels, out_channels)
@@ -62,6 +64,153 @@ class VariationalLinearEncoder(torch.nn.Module):
 
     def forward(self, x, edge_index):
         return self.conv_mu(x, edge_index), self.conv_logstd(x, edge_index)
+
+
+class LSTMEncoder(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int = 1,
+        bias: bool = True,
+        dropout: float = 0.0,
+        bidirectional: bool = False,
+    ):
+        """
+        Parameters
+        ----------
+        input_size: int
+            The number of expected features in the input x.
+        hidden_size: int
+            The number of features in the hidden state h.
+        num_layers: int
+            Number of recurrent layers. E.g., setting num_layers=2 would mean
+            stacking two LSTMs together to form a stacked LSTM, with the second
+            LSTM taking in outputs of the first LSTM and computing the final
+            results. Default: 1
+        bias: bool
+            If False, then the layer does not use bias weights b_ih and b_hh.
+            Default: True
+        dropout: float
+            If non-zero, introduces a Dropout layer on the outputs of each
+            LSTM layer except the last layer, with dropout probability equal
+            to dropout. Default: 0
+        bidirectional: bool
+            If True, becomes a bidirectional LSTM. Default: False
+        """
+        super().__init__()
+
+        self.lstm = nn.LSTM(
+            input_size,
+            hidden_size,
+            num_layers,
+            bias,
+            batch_first=True,
+            dropout=dropout,
+            bidirectional=bidirectional,
+        )
+
+        # Hidden state logic: https://discuss.pytorch.org/t/lstm-hidden-state-logic/48101
+        self.hidden_cell = (
+            torch.zeros(1, 1, hidden_size),
+            torch.zeros(1, 1, hidden_size),
+        )
+
+    def forward(self, x: torch.Tensor):
+        """
+        Parameters
+        ----------
+        x : torch.Tensor
+            Tensor of shape BxNxD for B batches of N nodes
+            by D node latent dimensions.
+        """
+        x = self.lstm(x)
+
+        out, hidden = self.lstm(x, self.hidden_cell)
+        self.hidden_cell = hidden
+        # x, (hidden_state, cell_state) = self.LSTM1(x)
+        # last_lstm_layer_hidden_state = hidden_state[-1, :, :]
+        return hidden
+
+
+class LSTMDecoder(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int = 1,
+        bias: bool = True,
+        dropout: float = 0.0,
+        bidirectional: bool = False,
+    ):
+        """
+        Parameters
+        ----------
+        input_size: int
+            The number of expected features in the input x.
+        hidden_size: int
+            The number of features in the hidden state h.
+        num_layers: int
+            Number of recurrent layers. E.g., setting num_layers=2 would mean
+            stacking two LSTMs together to form a stacked LSTM, with the second
+            LSTM taking in outputs of the first LSTM and computing the final
+            results. Default: 1
+        bias: bool
+            If False, then the layer does not use bias weights b_ih and b_hh.
+            Default: True
+        dropout: float
+            If non-zero, introduces a Dropout layer on the outputs of each
+            LSTM layer except the last layer, with dropout probability equal
+            to dropout. Default: 0
+        bidirectional: bool
+            If True, becomes a bidirectional LSTM. Default: False
+        """
+        super().__init__()
+
+        self.lstm = nn.LSTM(
+            input_size,
+            hidden_size,
+            num_layers,
+            bias,
+            batch_first=True,
+            dropout=dropout,
+            bidirectional=bidirectional,
+        )
+
+        # Hidden state logic: https://discuss.pytorch.org/t/lstm-hidden-state-logic/48101
+        self.hidden_cell = (
+            torch.zeros(1, 1, hidden_size),
+            torch.zeros(1, 1, hidden_size),
+        )
+
+    def forward(self, x: torch.Tensor):
+        """
+        Parameters
+        ----------
+        x : torch.Tensor
+            Tensor of shape BxNxD for B batches of N nodes
+            by D node latent dimensions.
+        """
+        x = self.lstm(x)
+
+        out, hidden = self.lstm(x, self.hidden_cell)
+        self.hidden_cell = hidden
+        # x, (hidden_state, cell_state) = self.LSTM1(x)
+        # last_lstm_layer_hidden_state = hidden_state[-1, :, :]
+        return hidden
+
+
+class LSTM_AE(nn.Module):
+    def __init__(self, input_size: int, hidden_size: int, **kwargs):
+        super().__init__()
+
+        self.encoder = LSTMEncoder(input_size, hidden_size, **kwargs)
+        self.decoder = LSTMDecoder(hidden_size, input_size, **kwargs)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return encoded, decoded
 
 
 # Data
@@ -78,29 +227,32 @@ loader = DataLoader(dataset, batch_size=1, shuffle=True)
 # Parameters
 out_channels = 10
 num_features = 13
+lstm_latent_dim = 10
 
-# Model
+# Models
 if not args.variational:
     if not args.linear:
-        model = GAE(GCNEncoder(num_features, out_channels))
+        node_ae = GAE(GCNEncoder(num_features, out_channels))
     else:
-        model = GAE(LinearEncoder(num_features, out_channels))
+        node_ae = GAE(LinearEncoder(num_features, out_channels))
 else:
     if args.linear:
-        model = VGAE(VariationalLinearEncoder(num_features, out_channels))
+        node_ae = VGAE(VariationalLinearEncoder(num_features, out_channels))
     else:
-        model = VGAE(VariationalGCNEncoder(num_features, out_channels))
+        node_ae = VGAE(VariationalGCNEncoder(num_features, out_channels))
+
+lstm_ae = LSTM_AE(out_channels, lstm_latent_dim)
 
 # Hardware
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model, data = model.to(device), data.to(device)
+node_ae, lstm_ae, data = node_ae.to(device), lstm_ae.to(device), data.to(device)
 
 # Optimizer
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+optimizer = torch.optim.Adam(node_ae.parameters(), lr=0.01)
 
 
 def train():
-    model.train()
+    node_ae.train()
     optimizer.zero_grad()
 
     if args.constant:
@@ -110,17 +262,18 @@ def train():
     else:
         x = data.x
 
-    z = model.encode(data.x, data.edge_index)
-    loss = model.recon_loss(z, data.edge_index)
+    z = node_ae.encode(data.x, data.edge_index)
+    loss = node_ae.recon_loss(z, data.edge_index)
     if args.variational:
-        loss = loss + (1 / data.num_nodes) * model.kl_loss()
+        loss = loss + (1 / data.num_nodes) * node_ae.kl_loss()
+
     loss.backward()
     optimizer.step()
     return float(loss)
 
 
 def validate_with_rmsd():
-    model.eval()
+    node_ae.eval()
     output = defaultdict(list)
     with torch.no_grad():
         for sample in tqdm(loader):
@@ -134,7 +287,7 @@ def validate_with_rmsd():
             else:
                 x = data.x
 
-            z = model.encode(x, data.edge_index)
+            z = node_ae.encode(x, data.edge_index)
 
             # Collect embeddings for plot
             emb = z.detach().cpu().numpy()
