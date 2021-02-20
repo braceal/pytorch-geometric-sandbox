@@ -27,6 +27,7 @@ print("constant:", args.constant)
 # TODO: try using the lstm-decoded node embeddings with the inner product
 # decoder
 
+
 class GCNEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(GCNEncoder, self).__init__()
@@ -127,11 +128,11 @@ class LSTMEncoder(nn.Module):
             Tensor of shape BxNxD for B batches of N nodes
             by D node latent dimensions.
         """
-        output, (h_n, c_n) = self.lstm(x)#, self.hidden_cell)
+        output, (h_n, c_n) = self.lstm(x)  # , self.hidden_cell)
         self.hidden_cell = h_n
-        #print("h_n.shape:", h_n.shape)
-        #print("c_n.shape:", c_n.shape)
-        #print("output.shape:", output.shape)
+        # print("h_n.shape:", h_n.shape)
+        # print("c_n.shape:", c_n.shape)
+        # print("output.shape:", output.shape)
         # x, (hidden_state, cell_state) = self.LSTM1(x)
         # last_lstm_layer_hidden_state = hidden_state[-1, :, :]
         return h_n, c_n
@@ -196,16 +197,16 @@ class LSTMDecoder(nn.Module):
         outputs = torch.zeros_like(x)
         x_i = h_n
 
-        #print("decoder x.shape:", x.shape)
-        #print("decoder outputs.shape:", outputs.shape)
+        # print("decoder x.shape:", x.shape)
+        # print("decoder outputs.shape:", outputs.shape)
         for i in range(seq_len):
-            #print("decoder x_i.shape:", x_i.shape)
-            #print("decoder h_n.shape:", h_n.shape)
-            #print("decoder c_n.shape:", c_n.shape)
+            # print("decoder x_i.shape:", x_i.shape)
+            # print("decoder h_n.shape:", h_n.shape)
+            # print("decoder c_n.shape:", c_n.shape)
 
             output, (h_n, c_n) = self.lstm(x_i, (h_n, c_n))
             x_i = x[:, i].view(-1, 1, input_size)
-            #print("decoder output.shape:", output.shape)
+            # print("decoder output.shape:", output.shape)
             outputs[:, i] = output
 
         return outputs
@@ -219,7 +220,7 @@ class LSTM_AE(nn.Module):
         self.decoder = LSTMDecoder(hidden_size, input_size, **kwargs)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        #print("lstm ae: x.shape:", x.shape)
+        # print("lstm ae: x.shape:", x.shape)
         h_n, c_n = self.encoder(x)
         flipped_x = torch.flip(x, dims=(2,))
         decoded = self.decoder(flipped_x, h_n, c_n)
@@ -294,8 +295,11 @@ def train():
             loss = loss + (1 / data.num_nodes) * node_ae.kl_loss()
 
         graph_emb, node_z_recon = lstm_ae(node_z.view(1, *node_z.shape))
-        #print(graph_emb.shape)
-        #print(node_z_recon.shape)
+        # print(graph_emb.shape)
+        # print(node_z_recon.shape)
+
+        # GNN enc: NxF ->      NxD, Dec: NxD -> A
+        # Lstm: NxD -> K -> NxD ^
 
         loss += node_emb_recon_criterion(node_z, node_z_recon)
 
@@ -350,6 +354,7 @@ def validate_with_rmsd():
 
     return output
 
+
 def validate(epoch: int):
 
     output = validate_with_rmsd()
@@ -366,7 +371,9 @@ def validate(epoch: int):
         plot_name=f"epoch-{epoch}-graph_embeddings",
     )
 
-    random_sample = np.random.choice(len(output["node_embeddings"]), 8000, replace=False)
+    random_sample = np.random.choice(
+        len(output["node_embeddings"]), 8000, replace=False
+    )
     tsne_validation(
         embeddings=output["node_embeddings"][random_sample],
         paint=output["node_labels"][random_sample],
@@ -380,4 +387,3 @@ for epoch in range(1, args.epochs + 1):
     loss = train()
     print(f"Epoch: {epoch:03d}\tLoss: {loss}")
     validate(epoch)
-
