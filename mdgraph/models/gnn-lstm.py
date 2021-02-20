@@ -213,6 +213,8 @@ class LSTMDecoder(nn.Module):
 
 
 class LSTM_AE(nn.Module):
+    r"""LSTM Autoencoder model from: https://arxiv.org/pdf/1502.04681.pdf"""
+
     def __init__(self, input_size: int, hidden_size: int, **kwargs):
         super().__init__()
 
