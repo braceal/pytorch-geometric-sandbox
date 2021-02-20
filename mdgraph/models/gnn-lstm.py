@@ -249,7 +249,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 node_ae, lstm_ae, data = node_ae.to(device), lstm_ae.to(device), data.to(device)
 
 # Optimizer
-optimizer = torch.optim.Adam(node_ae.parameters(), lr=0.01)
+optimizer = torch.optim.Adam(
+    set(node_ae.parameters()) | set(lstm_ae.parameters()), lr=0.01
+)
 
 # Criterion
 node_emb_recon_criterion = nn.MSELoss()
