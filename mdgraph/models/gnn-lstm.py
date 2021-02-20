@@ -24,6 +24,8 @@ print("variational:", args.variational)
 print("linear:", args.linear)
 print("constant:", args.constant)
 
+# TODO: try using the lstm-decoded node embeddings with the inner product
+# decoder
 
 class GCNEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -270,6 +272,7 @@ node_emb_recon_criterion = nn.MSELoss()
 
 def train():
     node_ae.train()
+    lstm_ae.train()
 
     train_loss = 0.0
     for i, sample in enumerate(loader):
@@ -312,6 +315,7 @@ def train():
 
 def validate_with_rmsd():
     node_ae.eval()
+    lstm_ae.eval()
     output = defaultdict(list)
     with torch.no_grad():
         for sample in tqdm(loader):
@@ -346,32 +350,34 @@ def validate_with_rmsd():
 
     return output
 
+def validate(epoch: int):
+
+    output = validate_with_rmsd()
+
+    # Paint graph embeddings
+    random_sample = np.random.choice(
+        len(output["graph_embeddings"]), 8000, replace=False
+    )
+    tsne_validation(
+        embeddings=output["graph_embeddings"][random_sample],
+        paint=output["rmsd"][random_sample],
+        paint_name="rmsd",
+        plot_dir=Path("./test_plots"),
+        plot_name=f"epoch-{epoch}-graph_embeddings",
+    )
+
+    random_sample = np.random.choice(len(output["node_embeddings"]), 8000, replace=False)
+    tsne_validation(
+        embeddings=output["node_embeddings"][random_sample],
+        paint=output["node_labels"][random_sample],
+        paint_name="node_labels",
+        plot_dir=Path("./test_plots"),
+        plot_name=f"epoch-{epoch}-node_embeddings",
+    )
+
 
 for epoch in range(1, args.epochs + 1):
     loss = train()
     print(f"Epoch: {epoch:03d}\tLoss: {loss}")
-
-# Validate
-output = validate_with_rmsd()
-
-# Paint graph embeddings
-random_sample = np.random.choice(
-    len(output["graph_embeddings"]), 8000, replace=False
-)
-tsne_validation(
-    embeddings=output["graph_embeddings"][random_sample],
-    paint=output["rmsd"][random_sample],
-    paint_name="rmsd",
-    plot_dir=Path("./test_plots"),
-    plot_name=f"epoch-{epoch}-graph_embeddings",
-)
-
-random_sample = np.random.choice(len(output["node_embeddings"]), 8000, replace=False)
-tsne_validation(
-    embeddings=output["node_embeddings"][random_sample],
-    paint=output["node_labels"][random_sample],
-    paint_name="node_labels",
-    plot_dir=Path("./test_plots"),
-    plot_name=f"epoch-{epoch}-node_embeddings",
-)
+    validate(epoch)
 
