@@ -125,13 +125,14 @@ class LSTMEncoder(nn.Module):
             Tensor of shape BxNxD for B batches of N nodes
             by D node latent dimensions.
         """
-        x = self.lstm(x)
-
-        out, hidden = self.lstm(x, self.hidden_cell)
-        self.hidden_cell = hidden
+        output, (h_n, c_n) = self.lstm(x)#, self.hidden_cell)
+        self.hidden_cell = h_n
+        #print("h_n.shape:", h_n.shape)
+        #print("c_n.shape:", c_n.shape)
+        #print("output.shape:", output.shape)
         # x, (hidden_state, cell_state) = self.LSTM1(x)
         # last_lstm_layer_hidden_state = hidden_state[-1, :, :]
-        return hidden
+        return h_n, c_n
 
 
 class LSTMDecoder(nn.Module):
@@ -179,12 +180,9 @@ class LSTMDecoder(nn.Module):
         )
 
         # Hidden state logic: https://discuss.pytorch.org/t/lstm-hidden-state-logic/48101
-        self.hidden_cell = (
-            torch.zeros(1, 1, hidden_size),
-            torch.zeros(1, 1, hidden_size),
-        )
+        # TODO: add gradient clipping: https://github.com/bentrevett/pytorch-seq2seq/blob/master/1%20-%20Sequence%20to%20Sequence%20Learning%20with%20Neural%20Networks.ipynb
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, h_n: torch.Tensor, c_n: torch.Tensor):
         """
         Parameters
         ----------
@@ -192,13 +190,23 @@ class LSTMDecoder(nn.Module):
             Tensor of shape BxNxD for B batches of N nodes
             by D node latent dimensions.
         """
-        x = self.lstm(x)
+        seq_len, input_size = x.shape[1:]
+        outputs = torch.zeros_like(x)
+        x_i = h_n
 
-        out, hidden = self.lstm(x, self.hidden_cell)
-        self.hidden_cell = hidden
-        # x, (hidden_state, cell_state) = self.LSTM1(x)
-        # last_lstm_layer_hidden_state = hidden_state[-1, :, :]
-        return hidden
+        #print("decoder x.shape:", x.shape)
+        #print("decoder outputs.shape:", outputs.shape)
+        for i in range(seq_len):
+            #print("decoder x_i.shape:", x_i.shape)
+            #print("decoder h_n.shape:", h_n.shape)
+            #print("decoder c_n.shape:", c_n.shape)
+
+            output, (h_n, c_n) = self.lstm(x_i, (h_n, c_n))
+            x_i = x[:, i].view(-1, 1, input_size)
+            #print("decoder output.shape:", output.shape)
+            outputs[:, i] = output
+
+        return outputs
 
 
 class LSTM_AE(nn.Module):
@@ -209,9 +217,12 @@ class LSTM_AE(nn.Module):
         self.decoder = LSTMDecoder(hidden_size, input_size, **kwargs)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        return encoded, decoded
+        #print("lstm ae: x.shape:", x.shape)
+        h_n, c_n = self.encoder(x)
+        flipped_x = torch.flip(x, dims=(2,))
+        decoded = self.decoder(flipped_x, h_n, c_n)
+        decoded = torch.flip(decoded, dims=(2,))
+        return h_n, decoded
 
 
 # Data
@@ -278,8 +289,8 @@ def train():
             loss = loss + (1 / data.num_nodes) * node_ae.kl_loss()
 
         graph_emb, node_z_recon = lstm_ae(node_z.view(1, *node_z.shape))
-        print(graph_emb.shape)
-        print(node_z_recon.shape)
+        #print(graph_emb.shape)
+        #print(node_z_recon.shape)
 
         loss += node_emb_recon_criterion(node_z, node_z_recon)
 
@@ -312,12 +323,14 @@ def validate_with_rmsd():
             else:
                 x = data.x
 
-            z = node_ae.encode(x, data.edge_index)
+            node_z = node_ae.encode(x, data.edge_index)
+            graph_z, node_z_recon = lstm_ae(node_z.view(1, *node_z.shape))
 
             # Collect embeddings for plot
-            emb = z.detach().cpu().numpy()
-            output["graph_embeddings"].append(emb.sum(axis=0))
-            output["node_embeddings"].append(emb)
+            node_emb = node_z.detach().cpu().numpy()
+            graph_emb = graph_z.detach().cpu().numpy()
+            output["graph_embeddings"].append(graph_emb)
+            output["node_embeddings"].append(node_emb)
             output["node_labels"].append(data.y.detach().cpu().numpy())
             output["rmsd"].append(sample["rmsd"].detach().cpu().numpy())
 
@@ -338,6 +351,19 @@ for epoch in range(1, args.epochs + 1):
 
 # Validate
 output = validate_with_rmsd()
+
+# Paint graph embeddings
+random_sample = np.random.choice(
+    len(output["graph_embeddings"]), 8000, replace=False
+)
+tsne_validation(
+    embeddings=output["graph_embeddings"][random_sample],
+    paint=output["rmsd"][random_sample],
+    paint_name="rmsd",
+    plot_dir=Path("./test_plots"),
+    plot_name=f"epoch-{epoch}-graph_embeddings",
+)
+
 random_sample = np.random.choice(len(output["node_embeddings"]), 8000, replace=False)
 tsne_validation(
     embeddings=output["node_embeddings"][random_sample],
@@ -346,3 +372,4 @@ tsne_validation(
     plot_dir=Path("./test_plots"),
     plot_name=f"epoch-{epoch}-node_embeddings",
 )
+
