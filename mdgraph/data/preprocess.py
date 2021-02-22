@@ -1,8 +1,9 @@
 import time
 import h5py
 import numpy as np
+from pathlib import Path
 from tqdm import tqdm
-from typing import List, Optional
+from typing import List, Optional, Union
 from sklearn import preprocessing
 import MDAnalysis
 from MDAnalysis.analysis import distances, rms, align
@@ -15,6 +16,8 @@ from mdtools.writers import (
     write_rmsd,
     write_point_cloud,
 )
+
+PathLike = Union[str, Path]
 
 
 def aminoacid_int_encoding(pdb_file):
@@ -34,7 +37,7 @@ def aminoacid_int_to_onehot(labels):
 
 
 def write_h5(
-    save_file: str,
+    save_file: PathLike,
     rmsds: List[float],
     fncs: List[float],
     rows: List[np.ndarray],
@@ -48,7 +51,7 @@ def write_h5(
 
     Parameters
     ----------
-    save_file : str
+    save_file : PathLike
         Path of output h5 file used to save datasets.
     rmsds : List[float]
         Stores rmsd data.
@@ -71,10 +74,10 @@ def write_h5(
 
 
 def traj_to_dset(
-    topology: str,
-    ref_topology: str,
-    traj_file: str,
-    save_file: Optional[str] = None,
+    topology: PathLike,
+    ref_topology: PathLike,
+    traj_file: PathLike,
+    save_file: Optional[PathLike] = None,
     cutoff: float = 8.0,
     selection: str = "protein and name CA",
     skip_every: int = 1,
@@ -90,18 +93,18 @@ def traj_to_dset(
     point cloud (xyz coordinates) of each frame in the trajectory.
     Parameters
     ----------
-    topology : str
+    topology : PathLike
         Path to topology file: CHARMM/XPLOR PSF topology file,
         PDB file or Gromacs GRO file.
-    ref_topology : str
+    ref_topology : PathLike
         Path to reference topology file for aligning trajectory:
         CHARMM/XPLOR PSF topology file, PDB file or Gromacs GRO file.
-    traj_file : str
+    traj_file : PathLike
         Trajectory file (in CHARMM/NAMD/LAMMPS DCD, Gromacs XTC/TRR,
         or generic. Stores coordinate information for the trajectory.
     cutoff : float
         Angstrom cutoff distance to compute contact maps.
-    save_file : Optional[str]
+    save_file : Optional[PathLike]
         Path to output h5 dataset file name.
     selection : str
         Selection set of atoms in the protein.
@@ -121,8 +124,8 @@ def traj_to_dset(
     start_time = time.time()
 
     # Load simulation and reference structures
-    sim = MDAnalysis.Universe(topology, traj_file)
-    ref = MDAnalysis.Universe(ref_topology)
+    sim = MDAnalysis.Universe(str(topology), str(traj_file))
+    ref = MDAnalysis.Universe(str(ref_topology))
 
     if verbose:
         print("Traj length: ", len(sim.trajectory))
@@ -192,10 +195,10 @@ def _worker(kwargs):
 
 
 def parallel_preprocess(
-    topology_files: List[str],
-    traj_files: List[str],
-    ref_topology: str,
-    save_files: List[str],
+    topology_files: List[PathLike],
+    traj_files: List[PathLike],
+    ref_topology: PathLike,
+    save_files: List[PathLike],
     cutoff: float = 8.0,
     selection: str = "protein and name CA",
     print_every: int = 1000,
