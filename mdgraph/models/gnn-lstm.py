@@ -181,6 +181,10 @@ class LSTMDecoder(nn.Module):
             dropout=dropout,
             bidirectional=bidirectional,
         )
+        # TODO:
+        # Analyze: Does it reconstruct links between AAs close to each other, how about far away?
+        # Add link prediction task for long distance links (far away in AA seq)
+        # Add multitask regression head for potential energy
 
         # Hidden state logic: https://discuss.pytorch.org/t/lstm-hidden-state-logic/48101
         # TODO: add gradient clipping: https://github.com/bentrevett/pytorch-seq2seq/blob/master/1%20-%20Sequence%20to%20Sequence%20Learning%20with%20Neural%20Networks.ipynb

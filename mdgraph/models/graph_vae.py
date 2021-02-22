@@ -388,7 +388,7 @@ def train():
         # print("node_z shape:", node_z.shape)
         # Get graph embedding
         (
-            graph_z,
+            graph_z,  # [7, 1]
             mu,
             logstd,
             edge_index,
