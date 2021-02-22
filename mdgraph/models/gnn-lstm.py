@@ -115,10 +115,6 @@ class LSTMEncoder(nn.Module):
         )
 
         # Hidden state logic: https://discuss.pytorch.org/t/lstm-hidden-state-logic/48101
-        self.hidden_cell = (
-            torch.zeros(1, 1, hidden_size),
-            torch.zeros(1, 1, hidden_size),
-        )
 
     def forward(self, x: torch.Tensor):
         """
@@ -128,13 +124,12 @@ class LSTMEncoder(nn.Module):
             Tensor of shape BxNxD for B batches of N nodes
             by D node latent dimensions.
         """
-        output, (h_n, c_n) = self.lstm(x)  # , self.hidden_cell)
-        self.hidden_cell = h_n
-        # print("h_n.shape:", h_n.shape)
-        # print("c_n.shape:", c_n.shape)
-        # print("output.shape:", output.shape)
-        # x, (hidden_state, cell_state) = self.LSTM1(x)
-        # last_lstm_layer_hidden_state = hidden_state[-1, :, :]
+        batch_size = x.shape[0]
+        #print("lstm encoder x.shape:", x.shape)
+        output, (h_n, c_n) = self.lstm(x)
+        #print("enc h_n.shape:", h_n.shape)
+        #print("enc c_n.shape:", c_n.shape)
+        #print("enc output.shape:", output.shape)
         return h_n, c_n
 
 
@@ -172,6 +167,11 @@ class LSTMDecoder(nn.Module):
         """
         super().__init__()
 
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.num_directions = 2 if bidirectional else 1
+
         self.lstm = nn.LSTM(
             input_size,
             hidden_size,
@@ -193,9 +193,14 @@ class LSTMDecoder(nn.Module):
             Tensor of shape BxNxD for B batches of N nodes
             by D node latent dimensions.
         """
-        seq_len, input_size = x.shape[1:]
-        outputs = torch.zeros_like(x)
-        x_i = h_n
+        batch_size, seq_len, input_size = x.shape
+        assert input_size == self.input_size
+
+        outputs = torch.zeros_like(x) # (batch_size, seq_len, input_size)
+        #print("decoder outputs.shape:", outputs.shape)
+        x_i = h_n.view(
+            batch_size, self.num_layers * self.num_directions, self.hidden_size
+        )
 
         # print("decoder x.shape:", x.shape)
         # print("decoder outputs.shape:", outputs.shape)
@@ -203,11 +208,16 @@ class LSTMDecoder(nn.Module):
             # print("decoder x_i.shape:", x_i.shape)
             # print("decoder h_n.shape:", h_n.shape)
             # print("decoder c_n.shape:", c_n.shape)
-
+            # print("decoder x_i.shape:", x_i.shape)
             output, (h_n, c_n) = self.lstm(x_i, (h_n, c_n))
-            x_i = x[:, i].view(-1, 1, input_size)
-            # print("decoder output.shape:", output.shape)
-            outputs[:, i] = output
+            x_i = x[:, i].view(
+                batch_size, self.num_layers * self.num_directions, input_size
+            )
+            # TODO: handle bidirectional output shape: (batch, seq_len==1, num_directions * hidden_size)
+            #print("decoder x_i.shape:", x_i.shape)
+            #print("decoder output.shape:", output.shape)
+            #print("decoder output.sqeeuze().shape", output.squeeze().shape)
+            outputs[:, i, :] = output.squeeze()
 
         return outputs
 
@@ -224,11 +234,19 @@ class LSTM_AE(nn.Module):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         # print("lstm ae: x.shape:", x.shape)
         h_n, c_n = self.encoder(x)
+        # TODO: verify flip logic
         flipped_x = torch.flip(x, dims=(2,))
         decoded = self.decoder(flipped_x, h_n, c_n)
         decoded = torch.flip(decoded, dims=(2,))
         return h_n, decoded
 
+
+# Parameters
+out_channels = 10
+num_features = 13
+lstm_latent_dim = 10
+batch_size = 128
+num_nodes = 28
 
 # Data
 path = Path(__file__).parent / "../../test/data/BBA-subset-100.h5"
@@ -238,13 +256,8 @@ node_feature_path = (
 dataset = ContactMapDataset(
     path, "contact_map", ["rmsd"], node_feature_path=node_feature_path
 )
-data = dataset[0]["X"]
-loader = DataLoader(dataset, batch_size=1, shuffle=True)
-
-# Parameters
-out_channels = 10
-num_features = 13
-lstm_latent_dim = 10
+loader = DataLoader(dataset, batch_size=batch_size, shuffle=True,
+        drop_last=True)
 
 # Models
 if not args.variational:
@@ -262,7 +275,7 @@ lstm_ae = LSTM_AE(out_channels, lstm_latent_dim)
 
 # Hardware
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-node_ae, lstm_ae, data = node_ae.to(device), lstm_ae.to(device), data.to(device)
+node_ae, lstm_ae = node_ae.to(device), lstm_ae.to(device)
 
 # Optimizer
 optimizer = torch.optim.Adam(
@@ -281,24 +294,33 @@ def train():
     for i, sample in enumerate(loader):
         start = time.time()
         optimizer.zero_grad()
+
         data = sample["X"]
         data = data.to(device)
 
+        #print(data.x.shape)
+
         if args.constant:
-            num_nodes = int(data.edge_index.max().item()) + 1
-            x = torch.ones((num_nodes, num_features))
-            x = x.to(device)
+            pass
+            #num_nodes = int(data.edge_index.max().item()) + 1
+            #x = torch.ones((num_nodes, num_features))
+            #x = x.to(device)
         else:
             x = data.x
 
         node_z = node_ae.encode(data.x, data.edge_index)
+        #print("node_z.shape:", node_z.shape)
         loss = node_ae.recon_loss(node_z, data.edge_index)
         if args.variational:
             loss = loss + (1 / data.num_nodes) * node_ae.kl_loss()
-
-        graph_emb, node_z_recon = lstm_ae(node_z.view(1, *node_z.shape))
+        
+        # A, B, C 
+        # node_z.shape == (56, 10)
+        #node_z = node_z.view(batch_size, -1, out_channels)
+        node_z = node_z.view(-1, num_nodes, out_channels)
+        graph_emb, node_z_recon = lstm_ae(node_z)
         # print(graph_emb.shape)
-        # print(node_z_recon.shape)
+        #print(node_z_recon.shape)
 
         # GNN enc: NxF ->      NxD, Dec: NxD -> A
         # Lstm: NxD -> K -> NxD ^
@@ -309,7 +331,7 @@ def train():
         optimizer.step()
         train_loss += loss.item()
 
-        if i % 100 == 0:
+        if i % 1 == 0:
             print(
                 f"Training {i}/{len(loader)}. Loss: {train_loss / (i + 1)} Batch time: {time.time() - start}"
             )
@@ -329,22 +351,24 @@ def validate_with_rmsd():
             data = data.to(device)
 
             if args.constant:
-                num_nodes = int(data.edge_index.max().item()) + 1
-                x = torch.ones((num_nodes, num_features))
-                x = x.to(device)
+                pass
+                #num_nodes = int(data.edge_index.max().item()) + 1
+                #x = torch.ones((num_nodes, num_features))
+                #x = x.to(device)
             else:
                 x = data.x
 
             node_z = node_ae.encode(x, data.edge_index)
-            graph_z, node_z_recon = lstm_ae(node_z.view(1, *node_z.shape))
+            node_z = node_z.view(-1, num_nodes, out_channels)
+            graph_z, node_z_recon = lstm_ae(node_z)
 
             # Collect embeddings for plot
-            node_emb = node_z.detach().cpu().numpy()
+            node_emb = node_z.view(batch_size*num_nodes, out_channels).detach().cpu().numpy()
             graph_emb = graph_z.detach().cpu().numpy()
-            output["graph_embeddings"].append(graph_emb)
+            output["graph_embeddings"].extend(graph_emb)
             output["node_embeddings"].append(node_emb)
             output["node_labels"].append(data.y.detach().cpu().numpy())
-            output["rmsd"].append(sample["rmsd"].detach().cpu().numpy())
+            output["rmsd"].extend(list(sample["rmsd"].detach().cpu().numpy()))
 
     output = {key: np.array(val).squeeze() for key, val in output.items()}
 
@@ -352,7 +376,13 @@ def validate_with_rmsd():
     output["node_embeddings"] = output["node_embeddings"].reshape(
         shape[0] * shape[1], -1
     )
+    output["graph_embeddings"] = output["graph_embeddings"].reshape(
+        batch_size * len(loader), lstm_latent_dim   
+    )
     output["node_labels"] = output["node_labels"].flatten()
+
+    for key, val in output.items():
+        print(key, val.shape)
 
     return output
 
