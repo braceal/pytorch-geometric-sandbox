@@ -157,8 +157,12 @@ def traj_to_dset(
         coo = cm.tocoo()
         rows.append(coo.row.astype("int16"))
         cols.append(coo.col.astype("int16"))
-        vals.append(distances.self_distance_array(positions, box=box))
-
+        # TODO: Could try to use self_distance_array to compute n*(n-1)/2 dim
+        # array instead of n*n
+        dists = distances.distance_array(positions, positions, box=box)
+        dists = np.array([dists[row, col] for row, col in zip(coo.row, coo.col)])
+        vals.append(dists)
+        
         # Compute and store fraction of native contacts
         fncs.append(fraction_of_contacts(cm, ref_cm))
 
@@ -176,6 +180,8 @@ def traj_to_dset(
                 msg += f"\trmsd: {rmsds[i]}"
                 msg += f"\tfnc: {fncs[i]}"
                 msg += f"\tshape: {positions.shape}"
+                msg += f"\trow shape: {rows[-1].shape}"
+                msg += f"\tvals shape: {vals[-1].shape}"
                 print(msg)
 
     point_clouds = np.transpose(point_clouds, [0, 2, 1])
