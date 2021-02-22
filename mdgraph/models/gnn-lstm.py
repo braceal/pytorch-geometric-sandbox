@@ -124,12 +124,12 @@ class LSTMEncoder(nn.Module):
             Tensor of shape BxNxD for B batches of N nodes
             by D node latent dimensions.
         """
-        batch_size = x.shape[0]
-        #print("lstm encoder x.shape:", x.shape)
-        output, (h_n, c_n) = self.lstm(x)
-        #print("enc h_n.shape:", h_n.shape)
-        #print("enc c_n.shape:", c_n.shape)
-        #print("enc output.shape:", output.shape)
+        # batch_size = x.shape[0]
+        # print("lstm encoder x.shape:", x.shape)
+        _, (h_n, c_n) = self.lstm(x)  # output, (h_n, c_n)
+        # print("enc h_n.shape:", h_n.shape)
+        # print("enc c_n.shape:", c_n.shape)
+        # print("enc output.shape:", output.shape)
         return h_n, c_n
 
 
@@ -196,8 +196,8 @@ class LSTMDecoder(nn.Module):
         batch_size, seq_len, input_size = x.shape
         assert input_size == self.input_size
 
-        outputs = torch.zeros_like(x) # (batch_size, seq_len, input_size)
-        #print("decoder outputs.shape:", outputs.shape)
+        outputs = torch.zeros_like(x)  # (batch_size, seq_len, input_size)
+        # print("decoder outputs.shape:", outputs.shape)
         x_i = h_n.view(
             batch_size, self.num_layers * self.num_directions, self.hidden_size
         )
@@ -214,9 +214,9 @@ class LSTMDecoder(nn.Module):
                 batch_size, self.num_layers * self.num_directions, input_size
             )
             # TODO: handle bidirectional output shape: (batch, seq_len==1, num_directions * hidden_size)
-            #print("decoder x_i.shape:", x_i.shape)
-            #print("decoder output.shape:", output.shape)
-            #print("decoder output.sqeeuze().shape", output.squeeze().shape)
+            # print("decoder x_i.shape:", x_i.shape)
+            # print("decoder output.shape:", output.shape)
+            # print("decoder output.sqeeuze().shape", output.squeeze().shape)
             outputs[:, i, :] = output.squeeze()
 
         return outputs
@@ -256,8 +256,7 @@ node_feature_path = (
 dataset = ContactMapDataset(
     path, "contact_map", ["rmsd"], node_feature_path=node_feature_path
 )
-loader = DataLoader(dataset, batch_size=batch_size, shuffle=True,
-        drop_last=True)
+loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
 # Models
 if not args.variational:
@@ -298,32 +297,17 @@ def train():
         data = sample["X"]
         data = data.to(device)
 
-        #print(data.x.shape)
-
-        if args.constant:
-            pass
-            #num_nodes = int(data.edge_index.max().item()) + 1
-            #x = torch.ones((num_nodes, num_features))
-            #x = x.to(device)
-        else:
-            x = data.x
-
         node_z = node_ae.encode(data.x, data.edge_index)
-        #print("node_z.shape:", node_z.shape)
+        # print("node_z.shape:", node_z.shape)
         loss = node_ae.recon_loss(node_z, data.edge_index)
         if args.variational:
             loss = loss + (1 / data.num_nodes) * node_ae.kl_loss()
-        
-        # A, B, C 
-        # node_z.shape == (56, 10)
-        #node_z = node_z.view(batch_size, -1, out_channels)
+
+        # node_z = node_z.view(batch_size, -1, out_channels)
         node_z = node_z.view(-1, num_nodes, out_channels)
         graph_emb, node_z_recon = lstm_ae(node_z)
         # print(graph_emb.shape)
-        #print(node_z_recon.shape)
-
-        # GNN enc: NxF ->      NxD, Dec: NxD -> A
-        # Lstm: NxD -> K -> NxD ^
+        # print(node_z_recon.shape)
 
         loss += node_emb_recon_criterion(node_z, node_z_recon)
 
@@ -350,20 +334,14 @@ def validate_with_rmsd():
             data = sample["X"]
             data = data.to(device)
 
-            if args.constant:
-                pass
-                #num_nodes = int(data.edge_index.max().item()) + 1
-                #x = torch.ones((num_nodes, num_features))
-                #x = x.to(device)
-            else:
-                x = data.x
-
-            node_z = node_ae.encode(x, data.edge_index)
+            node_z = node_ae.encode(data.x, data.edge_index)
             node_z = node_z.view(-1, num_nodes, out_channels)
             graph_z, node_z_recon = lstm_ae(node_z)
 
             # Collect embeddings for plot
-            node_emb = node_z.view(batch_size*num_nodes, out_channels).detach().cpu().numpy()
+            node_emb = (
+                node_z.view(batch_size * num_nodes, out_channels).detach().cpu().numpy()
+            )
             graph_emb = graph_z.detach().cpu().numpy()
             output["graph_embeddings"].extend(graph_emb)
             output["node_embeddings"].append(node_emb)
@@ -377,7 +355,7 @@ def validate_with_rmsd():
         shape[0] * shape[1], -1
     )
     output["graph_embeddings"] = output["graph_embeddings"].reshape(
-        batch_size * len(loader), lstm_latent_dim   
+        batch_size * len(loader), lstm_latent_dim
     )
     output["node_labels"] = output["node_labels"].flatten()
 
