@@ -3,7 +3,7 @@ from torch import nn
 import torch.optim
 import torch.nn.functional as F
 from torch_sparse import spspmm
-from torch_geometric.nn import TopKPooling, GCNConv, GAE
+from torch_geometric.nn import TopKPooling, GCNConv, GINConv, GAE, VGAE
 from torch_geometric.utils import add_self_loops, sort_edge_index, remove_self_loops
 from torch_geometric.utils.repeat import repeat
 
@@ -54,6 +54,34 @@ class UpPool(nn.Module):
         return up
 
 
+class GINLayer(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(GINLayer, self).__init__()
+        seq = nn.Sequential(
+            nn.Linear(in_channels, out_channels),
+            nn.ReLU(),
+            nn.Linear(out_channels, out_channels),
+        )
+        self.conv = GINConv(seq)
+        self.bn = nn.BatchNorm1d(out_channels)
+
+    def reset_parameters(self):
+        self.conv.reset_parameters()
+        # TODO: reset bn?
+
+    def forward(self, x, edge_index):
+        x = F.relu(self.conv(x, edge_index))
+        x = self.bn(x)
+        return x
+
+
+def generate_conv(in_channels: int, out_channels: int, use_gin: bool):
+    if use_gin:
+        return GINLayer(in_channels, out_channels)
+    else:
+        return GCNConv(in_channels, out_channels)
+
+
 class LinearEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(LinearEncoder, self).__init__()
@@ -81,6 +109,18 @@ class GCNEncoder(nn.Module):
         return self.conv2(x, edge_index)
 
 
+class VariationalGCNEncoder(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(VariationalGCNEncoder, self).__init__()
+        self.conv1 = GCNConv(in_channels, 2 * out_channels)
+        self.conv_mu = GCNConv(2 * out_channels, out_channels)
+        self.conv_logstd = GCNConv(2 * out_channels, out_channels)
+
+    def forward(self, x, edge_index):
+        x = self.conv1(x, edge_index).relu()
+        return self.conv_mu(x, edge_index), self.conv_logstd(x, edge_index)
+
+
 class VariationalGraphEncoder(nn.Module):
     """Acts on NxD node embedding matrix."""
 
@@ -93,6 +133,7 @@ class VariationalGraphEncoder(nn.Module):
         pool_ratios: float = 0.5,
         act=F.relu,
         variational: bool = True,
+        use_gin: bool = False,
     ):
         super(VariationalGraphEncoder, self).__init__()
         assert depth >= 1
@@ -109,10 +150,10 @@ class VariationalGraphEncoder(nn.Module):
             self.down_convs.append(
                 GCNConv(hidden_channels, hidden_channels, improved=True)
             )
-
-        self.conv_mu = GCNConv(hidden_channels, out_channels)
+        self.conv = generate_conv(hidden_channels, hidden_channels // 2, use_gin)
+        self.conv_mu = generate_conv(hidden_channels // 2, out_channels, use_gin)
         if self.variational:
-            self.conv_logstd = GCNConv(hidden_channels, out_channels)
+            self.conv_logstd = generate_conv(hidden_channels, out_channels, use_gin)
 
         self.reset_parameters()
 
@@ -121,6 +162,7 @@ class VariationalGraphEncoder(nn.Module):
             conv.reset_parameters()
         for pool in self.pools:
             pool.reset_parameters()
+        self.conv.reset_parameters()
         self.conv_mu.reset_parameters()
         if self.variational:
             self.conv_logstd.reset_parameters()
@@ -129,6 +171,7 @@ class VariationalGraphEncoder(nn.Module):
         x, edge_index, xs, edge_indices, edge_weights, perms = self.down_sample(
             x, edge_index, batch
         )
+        x = self.conv(x, edge_index)
         mu = self.conv_mu(x, edge_index)
         if self.variational:
             logstd = self.conv_logstd(x, edge_index)
@@ -201,6 +244,7 @@ class VariationalGraphDecoder(nn.Module):
         depth: int = 1,
         sum_res: bool = True,
         act=F.relu,
+        use_gin: bool = False,
     ):
         super(VariationalGraphDecoder, self).__init__()
         assert depth >= 1
@@ -209,7 +253,13 @@ class VariationalGraphDecoder(nn.Module):
         self.sum_res = sum_res
         self.act = act
 
-        self.projection_conv = GCNConv(in_channels, hidden_channels, improved=True)
+        # Before GIN, it was using GCNConv with improved=True
+        self.projection_conv1 = generate_conv(
+            in_channels, hidden_channels // 2, use_gin
+        )
+        self.projection_conv2 = generate_conv(
+            hidden_channels // 2, hidden_channels, use_gin
+        )
         self.up_convs = nn.ModuleList()
         for i in range(depth - 1):
             self.up_convs.append(
@@ -220,12 +270,14 @@ class VariationalGraphDecoder(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.projection_conv.reset_parameters()
+        self.projection_conv1.reset_parameters()
+        self.projection_conv2.reset_parameters()
         for conv in self.up_convs:
             conv.reset_parameters()
 
     def forward(self, x, edge_index, xs, edge_indices, edge_weights, perms):
-        x = self.projection_conv(x, edge_index)
+        x = self.projection_conv1(x, edge_index)
+        x = self.projection_conv2(x, edge_index)
         x = self.up_sample(x, xs, edge_indices, edge_weights, perms)
         return x
 
@@ -242,8 +294,8 @@ class VariationalGraphDecoder(nn.Module):
             # print("up.shape:", up.shape)
             # print("x.shape:", x.shape)
             up[perm] = x
-            x = res + up if self.sum_res else torch.cat((res, up), dim=-1)
-
+            # x = res + up if self.sum_res else torch.cat((res, up), dim=-1)
+            x = up
             x = self.up_convs[i](x, edge_index, edge_weight)
             x = self.act(x) if i < self.depth - 1 else x
 
@@ -266,6 +318,8 @@ pool_ratios = 0.5
 act = F.relu
 sum_res = True
 variational = False
+node_recon_loss_weight = 10.0
+use_gin = True
 
 path = Path(__file__).parent / "../../test/data/BBA-subset-100.h5"
 node_feature_path = (
@@ -278,9 +332,9 @@ loader = DataLoader(dataset, batch_size=1, shuffle=True)
 
 # Select node AE
 if args.linear:
-    node_ae = GAE(LinearEncoder(num_features, node_out_channels))
-else:
     node_ae = GAE(GCNEncoder(num_features, node_out_channels))
+else:
+    node_ae = VGAE(VariationalGCNEncoder(num_features, node_out_channels))
 
 # Select graph AE
 encoder = VariationalGraphEncoder(
@@ -291,6 +345,7 @@ encoder = VariationalGraphEncoder(
     pool_ratios,
     act,
     variational,
+    use_gin,
 )
 decoder = VariationalGraphDecoder(
     graph_out_channels,
@@ -299,6 +354,7 @@ decoder = VariationalGraphDecoder(
     depth,
     sum_res,
     act,
+    use_gin,
 )
 
 # Hardware
@@ -312,6 +368,8 @@ optimizer = torch.optim.Adam(
     lr=0.01,
 )
 
+node_emb_recon_criterion = nn.MSELoss()
+
 
 def train():
     node_ae.train()
@@ -320,6 +378,7 @@ def train():
 
     train_loss = 0.0
     for i, sample in enumerate(loader):
+        start = time.time()
         optimizer.zero_grad()
         data = sample["X"]
         data = data.to(device)
@@ -329,7 +388,7 @@ def train():
         # print("node_z shape:", node_z.shape)
         # Get graph embedding
         (
-            graph_z,
+            graph_z,  # [7, 1]
             mu,
             logstd,
             edge_index,
@@ -338,6 +397,7 @@ def train():
             edge_weights,
             perms,
         ) = encoder(node_z, data.edge_index)
+        assert logstd is None
         # print("graph_z shape:", graph_z.shape)
         # Reconstruct node embedding matrix
         node_z_recon = decoder(
@@ -345,9 +405,20 @@ def train():
         )
         # print("node_z_recon shape:", node_z_recon.shape)
 
+        # Adjacency matrix reconstruction
         loss = node_ae.recon_loss(node_z_recon, data.edge_index)
+        # print("node_ae rec loss:",loss)
+        # Node embedding reconstruction
+        rec_loss = node_recon_loss_weight * node_emb_recon_criterion(
+            node_z, node_z_recon
+        )
+        # print("rec_loss:",rec_loss)
+        loss += rec_loss
+        if not args.linear:
+            loss += (1 / data.num_nodes) * node_ae.kl_loss()
         # print("recon_loss:", recon_loss)
         if variational:
+            assert False
             kld_loss = kl_loss(mu, logstd)
             loss += kld_loss
         # print("kld loss:", kld_loss)
@@ -355,6 +426,11 @@ def train():
         loss.backward()
         optimizer.step()
         train_loss += loss.item()
+
+        if i % 100 == 0:
+            print(
+                f"Training {i}/{len(loader)}. Loss: {train_loss / (i + 1)} Batch time: {time.time() - start}"
+            )
 
     train_loss /= len(loader)
 
@@ -364,6 +440,7 @@ def train():
 def validate_with_rmsd():
     node_ae.eval()
     encoder.eval()
+    decoder.eval()
 
     output = defaultdict(list)
     with torch.no_grad():
@@ -372,22 +449,36 @@ def validate_with_rmsd():
             data = data.to(device)
 
             node_z = node_ae.encode(data.x, data.edge_index)
-            graph_z, *_ = encoder(node_z, data.edge_index)
+            (
+                graph_z,
+                mu,
+                logstd,
+                edge_index,
+                xs,
+                edge_indices,
+                edge_weights,
+                perms,
+            ) = encoder(node_z, data.edge_index)
+            node_z_recon = decoder(
+                graph_z, edge_index, xs, edge_indices, edge_weights, perms
+            )
 
             # Collect embeddings for plot
             node_emb = node_z.detach().cpu().numpy()
+            node_recon_emb = node_z_recon.detach().cpu().numpy()
             graph_emb = graph_z.detach().cpu().numpy()
             output["graph_embeddings"].append(graph_emb)
             output["node_embeddings"].append(node_emb)
             output["node_labels"].append(data.y.detach().cpu().numpy())
+            output["node_recon_embeddings"].append(node_recon_emb)
             output["rmsd"].append(sample["rmsd"].detach().cpu().numpy())
 
     output = {key: np.array(val).squeeze() for key, val in output.items()}
 
     shape = output["node_embeddings"].shape
-    output["node_embeddings"] = output["node_embeddings"].reshape(
-        shape[0] * shape[1], -1
-    )
+    for name in ["node_embeddings", "node_recon_embeddings"]:
+        output[name] = output[name].reshape(shape[0] * shape[1], -1)
+
     output["node_labels"] = output["node_labels"].flatten()
 
     return output
@@ -423,6 +514,18 @@ def validate(epoch: int):
         paint_name="node_labels",
         plot_dir=Path("./test_plots"),
         plot_name=f"epoch-{epoch}-node_embeddings",
+    )
+
+    # Paint node reconstruction embeddings
+    random_sample = np.random.choice(
+        len(output["node_recon_embeddings"]), 8000, replace=False
+    )
+    tsne_validation(
+        embeddings=output["node_recon_embeddings"][random_sample],
+        paint=output["node_labels"][random_sample],
+        paint_name="node_labels",
+        plot_dir=Path("./test_plots"),
+        plot_name=f"epoch-{epoch}-node_recon_embeddings",
     )
 
 
