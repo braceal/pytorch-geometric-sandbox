@@ -131,7 +131,7 @@ def traj_to_dset(
         print("Traj length: ", len(sim.trajectory))
 
     # Align trajectory to compute accurate RMSD and point cloud
-    align.AlignTraj(sim, ref, select="protein", in_memory=True).run()
+    align.AlignTraj(sim, ref, select=selection, in_memory=True).run()
 
     if verbose:
         print(f"Finish aligning after: {time.time() - start_time} seconds")
