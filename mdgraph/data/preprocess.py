@@ -20,6 +20,7 @@ from mdtools.writers import (
 PathLike = Union[str, Path]
 
 
+
 def aminoacid_int_encoding(pdb_file):
     u = MDAnalysis.Universe(pdb_file)
     resnames = [r.resname for r in u.atoms.residues]
@@ -36,6 +37,17 @@ def aminoacid_int_to_onehot(labels):
     return onehot
 
 
+def triu_to_full(cm0):
+    num_res = int(np.ceil((len(cm0) * 2) ** 0.5))
+    iu1 = np.triu_indices(num_res, 1)
+
+    cm_full = np.zeros((num_res, num_res))
+    cm_full[iu1] = cm0
+    cm_full.T[iu1] = cm0
+    np.fill_diagonal(cm_full, 1)
+    return cm_full
+
+  
 def write_h5(
     save_file: PathLike,
     rmsds: List[float],
@@ -224,3 +236,4 @@ def parallel_preprocess(
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         for _ in tqdm(executor.map(_worker, kwargs)):
             pass
+
