@@ -37,13 +37,14 @@ def concatenate_h5(
         if concat_dset.dtype != np.object:
             if np.any(np.isnan(concat_dset)):
                 raise ValueError("NaN detected in concat_dset.")
-            dset = fout.create_dataset(
-                field, shape, chunks=chunkshape, dtype=concat_dset.dtype
-            )
+            dtype = concat_dset.dtype
         else:
-            dset = fout.create_dataset(
-                field, shape, chunks=chunkshape, dtype=h5py.vlen_dtype(np.int16)
-            )
+            if field == "contact_map":  # contact_map is integer valued
+                dtype = h5py.vlen_dtype(np.int16)
+            else:
+                dtype = h5py.vlen_dtype(np.float32)
+
+        dset = fout.create_dataset(field, shape, chunks=chunkshape, dtype=dtype)
         # write data
         dset[...] = concat_dset[...]
 
