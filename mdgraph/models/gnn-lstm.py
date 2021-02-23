@@ -42,6 +42,12 @@ parser.add_argument(
     type=str,
     default=str(Path(__file__).parent / "../../test/data/BBA-subset-100.h5"),
 )
+parser.add_argument(
+    "--tsne_interval",
+    type=int,
+    default=5,
+    help="Run t-SNE every `tsne_interval` epochs.",
+)
 args = parser.parse_args()
 
 
@@ -445,6 +451,9 @@ def validate_with_rmsd():
 def validate(epoch: int):
 
     output, total_loss = validate_with_rmsd()
+
+    if epoch % args.tsne_interval != 0:
+        return total_loss
 
     # Paint graph embeddings
     random_sample = np.random.choice(
