@@ -1,8 +1,7 @@
 import torch
 import h5py
-import numpy as np
 from pathlib import Path
-from typing import List, Union, Optional
+from typing import List, Union
 from torch.utils.data import Dataset
 from torch_geometric.data import Data
 from mdgraph.data.preprocess import aminoacid_int_to_onehot
@@ -22,8 +21,8 @@ class ContactMapDataset(Dataset):
         path: PathLike,
         dataset_name: str,
         scalar_dset_names: List[str],
-        num_node_features: Optional[int] = None,
-        node_feature_path: Optional[PathLike] = None,
+        node_feature: str = "amino_acid_onehot",
+        constant_num_node_features: int = 20,
         scalar_requires_grad: bool = False,
     ):
         """
@@ -36,36 +35,48 @@ class ContactMapDataset(Dataset):
         scalar_dset_names : List[str]
             List of scalar dataset names inside HDF5 file to be passed
             to training logs.
-        num_node_features : int
-            Number of node features.
+        node_feature : str
+            Type of node features to use. Available options are `constant`,
+            `identity`, and `amino_acid_onehot`. If `constant` is selected,
+            `constant_num_node_features` must be selected.
+        constant_num_node_features : int
+            Number of node features when using constant `node_feature` vectors.
         scalar_requires_grad : bool
             Sets requires_grad torch.Tensor parameter for scalars specified by
             `scalar_dset_names`. Set to True, to use scalars for multi-task
             learning. If scalars are only required for plotting, then set it as False.
         """
-
-        # HDF5 data params
         self._file_path = str(path)
         self._dataset_name = dataset_name
         self._scalar_dset_names = scalar_dset_names
-        self._num_node_features = num_node_features
+        self._constant_num_node_features = constant_num_node_features
         self._scalar_requires_grad = scalar_requires_grad
+        self._initialized = False
 
-        # get node features
-        if node_feature_path is not None:
-            self.labels = np.load(node_feature_path)
-            self.node_features = aminoacid_int_to_onehot(self.labels)
-            self.labels = torch.from_numpy(self.labels).to(torch.long)
-            self.node_features = torch.from_numpy(self.node_features).to(torch.float32)
-        else:
-            self.node_features, self.labels = None, None
-
-        # get lengths and paths
+        # Get length and labels
         with self._open_h5_file() as f:
+            self._labels = torch.from_numpy(f["amino_acids"][...]).to(torch.long)
             self._len = len(f[self._dataset_name])
 
-        # inited:
-        self._initialized = False
+        self._node_features = self._select_node_features(node_feature)
+
+    @property
+    def num_nodes(self) -> int:
+        return len(self._labels)
+
+    def _select_node_features(self, node_feature: str) -> torch.Tensor:
+        if node_feature == "constant":
+            node_features = torch.ones(
+                (self.num_nodes, self._constant_num_node_features)
+            )
+        elif node_feature == "identity":
+            node_features = torch.eye(self.num_nodes)
+        elif node_feature == "amino_acid_onehot":
+            node_features = aminoacid_int_to_onehot(self._labels)
+        else:
+            raise ValueError(f"node_feature: {node_feature} not supported.")
+
+        return torch.from_numpy(node_features).to(torch.float32)
 
     def _open_h5_file(self):
         return h5py.File(self._file_path, "r", libver="latest", swmr=False)
@@ -83,26 +94,18 @@ class ContactMapDataset(Dataset):
             self.scalar_dsets = {
                 name: self._h5_file[name] for name in self._scalar_dset_names
             }
-
             self._initialized = True
 
         # Get adjacency list
         edge_index = self.dset[idx, ...].reshape(2, -1)  # [2, num_edges]
         edge_index = torch.from_numpy(edge_index).to(torch.long)
 
-        # node features (contast all ones)
-        if self.node_features is None:
-            num_nodes = int(edge_index.max().item()) + 1
-            x = torch.ones((num_nodes, self._num_node_features))
-            y = None
-        else:
-            x = self.node_features
-            y = self.labels
+        sample = {}
 
-        # Great graph data object
-        data = Data(x=x, edge_index=edge_index, y=y)
-
-        sample = {"X": data}
+        # Graph data object
+        sample["data"] = Data(
+            x=self._node_features, edge_index=edge_index, y=self._labels
+        )
         # Add index into dataset to sample
         sample["index"] = torch.tensor(idx, requires_grad=False)
         # Add scalars

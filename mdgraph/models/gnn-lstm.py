@@ -254,12 +254,7 @@ num_nodes = 28
 
 # Data
 path = Path(__file__).parent / "../../test/data/BBA-subset-100.h5"
-node_feature_path = (
-    Path(__file__).parent / "../../test/data/onehot_bba_amino_acid_labels.npy"
-)
-dataset = ContactMapDataset(
-    path, "contact_map", ["rmsd"], node_feature_path=node_feature_path
-)
+dataset = ContactMapDataset(path, "contact_map", ["rmsd"])
 loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
 # Models
