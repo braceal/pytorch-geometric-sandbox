@@ -18,6 +18,11 @@ parser.add_argument("--linear", action="store_true")
 parser.add_argument("--epochs", type=int, default=400)
 parser.add_argument("--name", type=str)
 parser.add_argument("--constant", action="store_true")
+parser.add_argument(
+    "--data_path",
+    type=str,
+    default=str(Path(__file__).parent / "../../test/data/BBA-subset-100.h5"),
+)
 args = parser.parse_args()
 
 print("variational:", args.variational)
@@ -253,8 +258,7 @@ batch_size = 128
 num_nodes = 28
 
 # Data
-path = Path(__file__).parent / "../../test/data/BBA-subset-100.h5"
-dataset = ContactMapDataset(path, "contact_map", ["rmsd"])
+dataset = ContactMapDataset(args.data_path, "contact_map", ["rmsd"])
 loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
 # Models
