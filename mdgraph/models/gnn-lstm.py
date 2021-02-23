@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Tuple
 import torch
 from torch import nn
+from torch.utils.data import random_split
 from torch_geometric.nn import GCNConv, GAE, VGAE
 from torch_geometric.data import DataLoader
 from mdgraph.data.dataset import ContactMapDataset
@@ -259,7 +260,10 @@ num_nodes = 28
 
 # Data
 dataset = ContactMapDataset(args.data_path, "contact_map", ["rmsd"])
-loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+lengths = [int(len(dataset) * 0.8), int(len(dataset) * 0.2)]
+train_dataset, valid_dataset = random_split(dataset, lengths)
+train_loader = DataLoader(train_dataset, batch_size, shuffle=True, drop_last=True)
+valid_loader = DataLoader(valid_dataset, batch_size, shuffle=True, drop_last=True)
 
 # Models
 if not args.variational:
@@ -293,7 +297,7 @@ def train():
     lstm_ae.train()
 
     train_loss = 0.0
-    for i, sample in enumerate(loader):
+    for i, sample in enumerate(train_loader):
         start = time.time()
         optimizer.zero_grad()
 
@@ -320,10 +324,10 @@ def train():
 
         if i % 1 == 0:
             print(
-                f"Training {i}/{len(loader)}. Loss: {train_loss / (i + 1)} Batch time: {time.time() - start}"
+                f"Training {i}/{len(train_loader)}. Loss: {train_loss / (i + 1)} Batch time: {time.time() - start}"
             )
 
-    train_loss /= len(loader)
+    train_loss /= len(train_loader)
 
     return train_loss
 
@@ -333,7 +337,7 @@ def validate_with_rmsd():
     lstm_ae.eval()
     output = defaultdict(list)
     with torch.no_grad():
-        for sample in tqdm(loader):
+        for sample in tqdm(valid_loader):
             data = sample["data"]
             data = data.to(device)
 
@@ -358,7 +362,7 @@ def validate_with_rmsd():
         shape[0] * shape[1], -1
     )
     output["graph_embeddings"] = output["graph_embeddings"].reshape(
-        batch_size * len(loader), lstm_latent_dim
+        batch_size * len(valid_loader), lstm_latent_dim
     )
     output["node_labels"] = output["node_labels"].flatten()
 
