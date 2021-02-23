@@ -348,9 +348,11 @@ def train(epoch: int):
             node_z = node_encoder(data.x, data.edge_index)
 
         # print("node_z.shape:", node_z.shape)
-        node_z = node_z.view(args.batch_size, num_nodes, out_channels)
-        graph_z, node_z_recon = lstm_ae(node_z)
-
+        graph_z, node_z_recon = lstm_ae(
+            node_z.view(args.batch_size, num_nodes, out_channels)
+        )
+        node_z_recon = node_z_recon.view(args.batch_size * num_nodes, out_channels)
+        assert node_z_recon.shape == node_z.shape
         # Reconstruction losses
         loss = recon_loss(
             node_decoder, node_z if args.use_node_z else node_z_recon, data.edge_index
