@@ -21,30 +21,6 @@ from mdtools.writers import (
 PathLike = Union[str, Path]
 
 
-AMINO_ACID_MAP = {
-    "ALA": 1,
-    "ARG": 2,
-    "ASN": 3,
-    "ASP": 4,
-    "CYS": 5,
-    "GLN": 6,
-    "GLU": 7,
-    "GLY": 8,
-    "HIS": 9,
-    "ILE": 10,
-    "LEU": 11,
-    "LYS": 12,
-    "MET": 13,
-    "PHE": 14,
-    "PRO": 15,
-    "SER": 16,
-    "THR": 17,
-    "TRP": 18,
-    "TYR": 19,
-    "VAL": 20,
-}
-
-
 def aminoacid_int_encoding(pdb_file):
     u = MDAnalysis.Universe(pdb_file)
     resnames = [r.resname for r in u.atoms.residues]
@@ -59,11 +35,6 @@ def aminoacid_int_to_onehot(labels):
     for i, label in enumerate(labels):
         onehot[i][label] = 1
     return onehot
-
-
-def aminoacid_int_seq(atoms):
-    residue_ints = [AMINO_ACID_MAP[r.resname] for r in atoms.residues]
-    return np.array(residue_ints, dtype="int8")
 
 
 def triu_to_full(cm0):
@@ -85,7 +56,7 @@ def write_h5(
     cols: List[np.ndarray],
     vals: Optional[List[np.ndarray]],
     point_clouds: np.ndarray,
-    residue_ints: np.ndarray,
+    residues: List[str],
 ):
     """
     Saves data to h5 file. All data is optional, can save any
@@ -107,15 +78,15 @@ def write_h5(
         Values associated with the contact map row,col entries.
     point_clouds : np.ndarray
         XYZ coordinate data in the shape: (N, 3, num_residues).
-    residue_ints : np.ndarray
-        Sequence of amino acids encoded by integers via AMINO_ACID_MAP.
+    residues : List[str]
+        Sequence of amino acids.
     """
     with h5py.File(save_file, "w", swmr=False) as h5_file:
         write_contact_map(h5_file, rows, cols, vals)
         write_rmsd(h5_file, rmsds)
         write_fraction_of_contacts(h5_file, fncs)
         write_point_cloud(h5_file, point_clouds)
-        write_aminoacid_int_seq(h5_file, residue_ints)
+        write_aminoacid_int_seq(h5_file, residues)
 
 
 def traj_to_dset(
@@ -183,8 +154,8 @@ def traj_to_dset(
 
     # Atom selection for reference
     atoms = sim.select_atoms(selection)
-    # Get int representation of amino acid sequence
-    residue_ints = aminoacid_int_seq(atoms)
+    # Get amino acid sequence
+    residues = [r.resname for r in atoms.residues]
     # Get atomic coordinates of reference atoms
     ref_positions = ref.select_atoms(selection).positions.copy()
     # Get box dimensions
@@ -234,7 +205,7 @@ def traj_to_dset(
     point_clouds = np.transpose(point_clouds, [0, 2, 1])
 
     if save_file:
-        write_h5(save_file, rmsds, fncs, rows, cols, vals, point_clouds, residue_ints)
+        write_h5(save_file, rmsds, fncs, rows, cols, vals, point_clouds, residues)
 
     if verbose:
         print(f"Duration {time.time() - start_time}s")
