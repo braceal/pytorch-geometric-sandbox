@@ -15,6 +15,13 @@ def concatenate_h5(
         with h5py.File(input_file_names[0], "r") as h5_file:
             fields = list(h5_file.keys())
 
+    # Should not concatenate this field. Only need 1 copy.
+    if "amino_acids" in fields:
+        fields.remove("amino_acids")
+        add_amino_acids = True
+    else:
+        add_amino_acids = False
+
     # Initialize data buffers
     data = {x: [] for x in fields}
 
@@ -26,6 +33,11 @@ def concatenate_h5(
     # Concatenate data
     for field in data:
         data[field] = np.concatenate(data[field])
+
+    # Add a single amino acid array
+    if add_amino_acids:
+        with h5py.File(input_file_names[0], "r", libver="latest") as fin:
+            data["amino_acids"] = fin["amino_acids"][...]
 
     # Create new dsets from concatenated dataset
     fout = h5py.File(output_name, "w", libver="latest")
