@@ -297,7 +297,10 @@ lstm_latent_dim = 10
 
 # Data
 dataset = ContactMapDataset(args.data_path, "contact_map", ["rmsd"])
-lengths = [int(len(dataset) * args.split_pct), int(len(dataset) * (1 - args.split_pct))]
+lengths = [
+    int(len(dataset) * args.split_pct),
+    int(len(dataset) * round(1 - args.split_pct, 2))
+]
 train_dataset, valid_dataset = random_split(dataset, lengths)
 train_loader = DataLoader(train_dataset, args.batch_size, shuffle=True, drop_last=True)
 valid_loader = DataLoader(valid_dataset, args.batch_size, shuffle=True, drop_last=True)
