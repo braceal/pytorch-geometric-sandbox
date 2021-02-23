@@ -257,7 +257,6 @@ class LSTM_AE(nn.Module):
 out_channels = 10
 num_features = 20
 lstm_latent_dim = 10
-num_nodes = 28
 
 # Data
 dataset = ContactMapDataset(args.data_path, "contact_map", ["rmsd"])
@@ -265,6 +264,7 @@ lengths = [int(len(dataset) * 0.8), int(len(dataset) * 0.2)]
 train_dataset, valid_dataset = random_split(dataset, lengths)
 train_loader = DataLoader(train_dataset, args.batch_size, shuffle=True, drop_last=True)
 valid_loader = DataLoader(valid_dataset, args.batch_size, shuffle=True, drop_last=True)
+num_nodes = dataset.num_nodes
 
 # Models
 if not args.variational:
@@ -299,7 +299,6 @@ def train():
     for i, sample in enumerate(train_loader):
         start = time.time()
         optimizer.zero_grad()
-
         data = sample["data"]
         data = data.to(device)
 
@@ -307,7 +306,7 @@ def train():
         # print("node_z.shape:", node_z.shape)
         loss = node_ae.recon_loss(node_z, data.edge_index)
         if args.variational:
-            loss = loss + (1 / data.num_nodes) * node_ae.kl_loss()
+            loss = loss + (1 / num_nodes) * node_ae.kl_loss()
 
         # node_z = node_z.view(batch_size, -1, out_channels)
         node_z = node_z.view(-1, num_nodes, out_channels)

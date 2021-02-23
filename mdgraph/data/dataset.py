@@ -59,12 +59,15 @@ class ContactMapDataset(Dataset):
             self._labels = f["amino_acids"][...]
             self._len = len(f[self._dataset_name])
 
-        self.num_nodes = len(self._labels)
         self._node_features = self._select_node_features(node_feature)
 
         # Convert to torch.Tensor
         self._node_features = torch.from_numpy(self._node_features).to(torch.float32)
         self._labels = torch.from_numpy(self._labels).to(torch.long)
+
+    @property
+    def num_nodes(self) -> int:
+        return len(self._labels)
 
     def _select_node_features(self, node_feature: str) -> np.ndarray:
         if node_feature == "constant":
@@ -102,9 +105,9 @@ class ContactMapDataset(Dataset):
         sample = {}
 
         # Graph data object
-        data = Data(x=self._node_features, edge_index=edge_index, y=self._labels)
-        data.num_nodes = self.num_nodes
-        sample["data"] = data
+        sample["data"] = Data(
+            x=self._node_features, edge_index=edge_index, y=self._labels
+        )
         # Add index into dataset to sample
         sample["index"] = torch.tensor(idx, requires_grad=False)
         # Add scalars
