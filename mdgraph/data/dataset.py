@@ -1,5 +1,6 @@
 import torch
 import h5py
+import numpy as np
 from pathlib import Path
 from typing import List, Union
 from torch.utils.data import Dataset
@@ -55,28 +56,29 @@ class ContactMapDataset(Dataset):
 
         # Get length and labels
         with self._open_h5_file() as f:
-            self._labels = torch.from_numpy(f["amino_acids"][...]).to(torch.long)
+            self._labels = f["amino_acids"][...]
             self._len = len(f[self._dataset_name])
 
         self._node_features = self._select_node_features(node_feature)
+
+        # Convert to torch.Tensor
+        self._node_features = torch.from_numpy(self._node_features).to(torch.float32)
+        self._labels = torch.from_numpy(self._labels).to(torch.long)
 
     @property
     def num_nodes(self) -> int:
         return len(self._labels)
 
-    def _select_node_features(self, node_feature: str) -> torch.Tensor:
+    def _select_node_features(self, node_feature: str) -> np.ndarray:
         if node_feature == "constant":
-            node_features = torch.ones(
-                (self.num_nodes, self._constant_num_node_features)
-            )
+            node_features = np.ones((self.num_nodes, self._constant_num_node_features))
         elif node_feature == "identity":
-            node_features = torch.eye(self.num_nodes)
+            node_features = np.eye(self.num_nodes)
         elif node_feature == "amino_acid_onehot":
             node_features = aminoacid_int_to_onehot(self._labels)
         else:
             raise ValueError(f"node_feature: {node_feature} not supported.")
-
-        return torch.from_numpy(node_features).to(torch.float32)
+        return node_features
 
     def _open_h5_file(self):
         return h5py.File(self._file_path, "r", libver="latest", swmr=False)
