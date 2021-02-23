@@ -252,7 +252,7 @@ class LSTM_AE(nn.Module):
 
 # Parameters
 out_channels = 10
-num_features = 13
+num_features = 20
 lstm_latent_dim = 10
 batch_size = 128
 num_nodes = 28
