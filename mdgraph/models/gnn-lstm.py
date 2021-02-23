@@ -17,6 +17,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--variational", action="store_true")
 parser.add_argument("--linear", action="store_true")
 parser.add_argument("--epochs", type=int, default=400)
+parser.add_argument("--batch_size", type=int, default=128)
 parser.add_argument("--name", type=str)
 parser.add_argument("--constant", action="store_true")
 parser.add_argument(
@@ -255,15 +256,14 @@ class LSTM_AE(nn.Module):
 out_channels = 10
 num_features = 20
 lstm_latent_dim = 10
-batch_size = 128
 num_nodes = 28
 
 # Data
 dataset = ContactMapDataset(args.data_path, "contact_map", ["rmsd"])
 lengths = [int(len(dataset) * 0.8), int(len(dataset) * 0.2)]
 train_dataset, valid_dataset = random_split(dataset, lengths)
-train_loader = DataLoader(train_dataset, batch_size, shuffle=True, drop_last=True)
-valid_loader = DataLoader(valid_dataset, batch_size, shuffle=True, drop_last=True)
+train_loader = DataLoader(train_dataset, args.batch_size, shuffle=True, drop_last=True)
+valid_loader = DataLoader(valid_dataset, args.batch_size, shuffle=True, drop_last=True)
 
 # Models
 if not args.variational:
@@ -347,7 +347,10 @@ def validate_with_rmsd():
 
             # Collect embeddings for plot
             node_emb = (
-                node_z.view(batch_size * num_nodes, out_channels).detach().cpu().numpy()
+                node_z.view(args.batch_size * num_nodes, out_channels)
+                .detach()
+                .cpu()
+                .numpy()
             )
             graph_emb = graph_z.detach().cpu().numpy()
             output["graph_embeddings"].extend(graph_emb)
@@ -362,7 +365,7 @@ def validate_with_rmsd():
         shape[0] * shape[1], -1
     )
     output["graph_embeddings"] = output["graph_embeddings"].reshape(
-        batch_size * len(valid_loader), lstm_latent_dim
+        args.batch_size * len(valid_loader), lstm_latent_dim
     )
     output["node_labels"] = output["node_labels"].flatten()
 
