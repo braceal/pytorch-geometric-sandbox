@@ -1,5 +1,6 @@
 import time
 import argparse
+from itertools import chain
 from pathlib import Path
 import numpy as np
 from tqdm import tqdm
@@ -284,9 +285,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 node_ae, lstm_ae = node_ae.to(device), lstm_ae.to(device)
 
 # Optimizer
-optimizer = torch.optim.Adam(
-    set(node_ae.parameters()) | set(lstm_ae.parameters()), lr=0.01
-)
+optimizer = torch.optim.Adam(chain(node_ae.parameters(), lstm_ae.parameters()), lr=0.01)
 
 # Criterion
 node_emb_recon_criterion = nn.MSELoss()
