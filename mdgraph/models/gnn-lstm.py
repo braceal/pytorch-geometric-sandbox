@@ -9,18 +9,34 @@ from typing import Tuple
 import torch
 from torch import nn
 from torch.utils.data import random_split
-from torch_geometric.nn import GCNConv, GAE, VGAE
+from torch_geometric.nn import GCNConv, InnerProductDecoder
+from torch_geometric.utils import negative_sampling, remove_self_loops, add_self_loops
 from torch_geometric.data import DataLoader
 from mdgraph.data.dataset import ContactMapDataset
 from mdgraph.utils import tsne_validation
 
+EPS = 1e-15
+MAX_LOGSTD = 10
+
 parser = argparse.ArgumentParser()
-parser.add_argument("--variational", action="store_true")
-parser.add_argument("--linear", action="store_true")
+parser.add_argument(
+    "--variational_node", action="store_true", help="Use variational node encoder"
+)
+parser.add_argument(
+    "--use_node_z",
+    action="store_true",
+    help="Compute adjacency matrix reconstruction using "
+    "node_encoder embeddings instead of LSTM decoder output",
+)
 parser.add_argument("--epochs", type=int, default=400)
 parser.add_argument("--batch_size", type=int, default=128)
-parser.add_argument("--name", type=str)
-parser.add_argument("--constant", action="store_true")
+parser.add_argument("--lr", type=float, default=0.01)
+parser.add_argument(
+    "--split_pct",
+    type=float,
+    default=0.8,
+    help="Percentage of data to use for training. The rest goes to validation.",
+)
 parser.add_argument(
     "--data_path",
     type=str,
@@ -28,12 +44,49 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-print("variational:", args.variational)
-print("linear:", args.linear)
-print("constant:", args.constant)
 
-# TODO: try using the lstm-decoded node embeddings with the inner product
-# decoder
+def kl_loss(mu: torch.Tensor, logstd: torch.Tensor):
+    r"""Computes the KL loss, either for the passed arguments :obj:`mu`
+    and :obj:`logstd`.
+    Args:
+        mu (Tensor): The latent space for :math:`\mu`.
+        logstd (Tensor): The latent space for :math:`\log\sigma`.
+    """
+    logstd = logstd.clamp(max=MAX_LOGSTD)
+    return -0.5 * torch.mean(
+        torch.sum(1 + 2 * logstd - mu ** 2 - logstd.exp() ** 2, dim=1)
+    )
+
+
+def reparametrize(mu: torch.Tensor, logstd: torch.Tensor, training: bool = False):
+    if training:
+        return mu + torch.randn_like(logstd) * torch.exp(logstd)
+    else:
+        return mu
+
+
+def recon_loss(decoder, z, pos_edge_index, neg_edge_index=None):
+    r"""Given latent variables :obj:`z`, computes the binary cross
+    entropy loss for positive edges :obj:`pos_edge_index` and negative
+    sampled edges.
+    Args:
+        z (Tensor): The latent space :math:`\mathbf{Z}`.
+        pos_edge_index (LongTensor): The positive edges to train against.
+        neg_edge_index (LongTensor, optional): The negative edges to train
+            against. If not given, uses negative sampling to calculate
+            negative edges. (default: :obj:`None`)
+    """
+
+    pos_loss = -torch.log(decoder(z, pos_edge_index, sigmoid=True) + EPS).mean()
+
+    # Do not include self-loops in negative samples
+    pos_edge_index, _ = remove_self_loops(pos_edge_index)
+    pos_edge_index, _ = add_self_loops(pos_edge_index)
+    if neg_edge_index is None:
+        neg_edge_index = negative_sampling(pos_edge_index, z.size(0))
+    neg_loss = -torch.log(1 - decoder(z, neg_edge_index, sigmoid=True) + EPS).mean()
+
+    return pos_loss + neg_loss
 
 
 class GCNEncoder(nn.Module):
@@ -56,26 +109,10 @@ class VariationalGCNEncoder(nn.Module):
 
     def forward(self, x, edge_index):
         x = self.conv1(x, edge_index).relu()
-        return self.conv_mu(x, edge_index), self.conv_logstd(x, edge_index)
-
-
-class LinearEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(LinearEncoder, self).__init__()
-        self.conv = GCNConv(in_channels, out_channels)
-
-    def forward(self, x, edge_index):
-        return self.conv(x, edge_index)
-
-
-class VariationalLinearEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(VariationalLinearEncoder, self).__init__()
-        self.conv_mu = GCNConv(in_channels, out_channels)
-        self.conv_logstd = GCNConv(in_channels, out_channels)
-
-    def forward(self, x, edge_index):
-        return self.conv_mu(x, edge_index), self.conv_logstd(x, edge_index)
+        mu = self.conv_mu(x, edge_index)
+        logstd = self.conv_logstd(x, edge_index)
+        z = reparametrize(mu, logstd, self.training)
+        return z
 
 
 class LSTMEncoder(nn.Module):
@@ -260,88 +297,116 @@ lstm_latent_dim = 10
 
 # Data
 dataset = ContactMapDataset(args.data_path, "contact_map", ["rmsd"])
-lengths = [int(len(dataset) * 0.8), int(len(dataset) * 0.2)]
+lengths = [int(len(dataset) * args.split_pct), int(len(dataset) * (1 - args.split_pct))]
 train_dataset, valid_dataset = random_split(dataset, lengths)
 train_loader = DataLoader(train_dataset, args.batch_size, shuffle=True, drop_last=True)
 valid_loader = DataLoader(valid_dataset, args.batch_size, shuffle=True, drop_last=True)
 num_nodes = dataset.num_nodes
 
 # Models
-if not args.variational:
-    if not args.linear:
-        node_ae = GAE(GCNEncoder(num_features, out_channels))
-    else:
-        node_ae = GAE(LinearEncoder(num_features, out_channels))
+if args.variational_node:
+    node_encoder = VariationalGCNEncoder(num_features, out_channels)
 else:
-    if args.linear:
-        node_ae = VGAE(VariationalLinearEncoder(num_features, out_channels))
-    else:
-        node_ae = VGAE(VariationalGCNEncoder(num_features, out_channels))
-
+    node_encoder = GCNEncoder(num_features, out_channels)
+node_decoder = InnerProductDecoder()
 lstm_ae = LSTM_AE(out_channels, lstm_latent_dim)
 
 # Hardware
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-node_ae, lstm_ae = node_ae.to(device), lstm_ae.to(device)
+node_encoder = node_encoder.to(device)
+node_decoder = node_decoder.to(device)
+lstm_ae = lstm_ae.to(device)
 
 # Optimizer
-optimizer = torch.optim.Adam(chain(node_ae.parameters(), lstm_ae.parameters()), lr=0.01)
+optimizer = torch.optim.Adam(
+    chain(node_encoder.parameters(), node_decoder.parameters(), lstm_ae.parameters()),
+    lr=args.lr,
+)
 
 # Criterion
 node_emb_recon_criterion = nn.MSELoss()
 
 
-def train():
-    node_ae.train()
+def train(epoch: int):
+    node_encoder.train()
+    node_decoder.train()
     lstm_ae.train()
 
-    train_loss = 0.0
+    total_loss = 0.0
     for i, sample in enumerate(train_loader):
         start = time.time()
         optimizer.zero_grad()
         data = sample["data"]
         data = data.to(device)
 
-        node_z = node_ae.encode(data.x, data.edge_index)
-        # print("node_z.shape:", node_z.shape)
-        loss = node_ae.recon_loss(node_z, data.edge_index)
-        if args.variational:
-            loss = loss + (1 / num_nodes) * node_ae.kl_loss()
+        if args.variational_node:
+            node_z, node_logstd = node_encoder(data.x, data.edge_index)
+        else:
+            node_z = node_encoder(data.x, data.edge_index)
 
-        # node_z = node_z.view(batch_size, -1, out_channels)
-        node_z = node_z.view(-1, num_nodes, out_channels)
-        graph_emb, node_z_recon = lstm_ae(node_z)
+        # print("node_z.shape:", node_z.shape)
+        node_z = node_z.view(args.batch_size, num_nodes, out_channels)
+        graph_z, node_z_recon = lstm_ae(node_z)
+
+        # Reconstruction losses
+        loss = recon_loss(
+            node_decoder, node_z if args.use_node_z else node_z_recon, data.edge_index
+        )
+        loss += node_emb_recon_criterion(node_z, node_z_recon)
+
+        # Variational losses
+        if args.variational_node:
+            loss += (1 / num_nodes) * kl_loss(node_z, node_logstd)
+
         # print(graph_emb.shape)
         # print(node_z_recon.shape)
 
-        loss += node_emb_recon_criterion(node_z, node_z_recon)
-
         loss.backward()
         optimizer.step()
-        train_loss += loss.item()
+        total_loss += loss.item()
 
-        if i % 1 == 0:
-            print(
-                f"Training {i}/{len(train_loader)}. Loss: {train_loss / (i + 1)} Batch time: {time.time() - start}"
-            )
+        print(
+            f"Training Epoch: {epoch} Batch: {i}/{len(train_loader)} "
+            f"Loss: {total_loss / (i + 1)} Batch time: {time.time() - start}"
+        )
 
-    train_loss /= len(train_loader)
+    total_loss /= len(train_loader)
 
-    return train_loss
+    return total_loss
 
 
 def validate_with_rmsd():
-    node_ae.eval()
+    node_encoder.eval()
+    node_decoder.eval()
     lstm_ae.eval()
     output = defaultdict(list)
+    total_loss = 0.0
     with torch.no_grad():
         for sample in tqdm(valid_loader):
             data = sample["data"]
             data = data.to(device)
 
-            node_z = node_ae.encode(data.x, data.edge_index)
-            node_z = node_z.view(-1, num_nodes, out_channels)
+            if args.variational_node:
+                node_z, node_logstd = node_encoder(data.x, data.edge_index)
+            else:
+                node_z = node_encoder(data.x, data.edge_index)
+
+            node_z = node_z.view(args.batch_size, num_nodes, out_channels)
             graph_z, node_z_recon = lstm_ae(node_z)
+
+            # Reconstruction losses
+            loss = recon_loss(
+                node_decoder,
+                node_z if args.use_node_z else node_z_recon,
+                data.edge_index,
+            )
+            loss += node_emb_recon_criterion(node_z, node_z_recon)
+
+            # Variational losses
+            if args.variational_node:
+                loss += (1 / num_nodes) * kl_loss(node_z, node_logstd)
+
+            total_loss += loss.item()
 
             # Collect embeddings for plot
             node_emb = (
@@ -367,15 +432,13 @@ def validate_with_rmsd():
     )
     output["node_labels"] = output["node_labels"].flatten()
 
-    for key, val in output.items():
-        print(key, val.shape)
-
-    return output
+    total_loss /= len(valid_loader)
+    return output, total_loss
 
 
 def validate(epoch: int):
 
-    output = validate_with_rmsd()
+    output, total_loss = validate_with_rmsd()
 
     # Paint graph embeddings
     random_sample = np.random.choice(
@@ -400,8 +463,10 @@ def validate(epoch: int):
         plot_name=f"epoch-{epoch}-node_embeddings",
     )
 
+    return total_loss
+
 
 for epoch in range(1, args.epochs + 1):
-    loss = train()
-    print(f"Epoch: {epoch:03d}\tLoss: {loss}")
-    validate(epoch)
+    train_loss = train(epoch)
+    valid_loss = validate(epoch)
+    print(f"Epoch: {epoch:03d}\t Train Loss: {train_loss} Valid Loss: {valid_loss}")
