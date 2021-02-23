@@ -352,7 +352,6 @@ def train(epoch: int):
             node_z.view(args.batch_size, num_nodes, out_channels)
         )
         node_z_recon = node_z_recon.view(args.batch_size * num_nodes, out_channels)
-        assert node_z_recon.shape == node_z.shape
         # Reconstruction losses
         loss = recon_loss(
             node_decoder, node_z if args.use_node_z else node_z_recon, data.edge_index
