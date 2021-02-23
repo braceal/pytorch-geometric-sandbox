@@ -297,7 +297,7 @@ def train():
         start = time.time()
         optimizer.zero_grad()
 
-        data = sample["X"]
+        data = sample["data"]
         data = data.to(device)
 
         node_z = node_ae.encode(data.x, data.edge_index)
@@ -334,7 +334,7 @@ def validate_with_rmsd():
     output = defaultdict(list)
     with torch.no_grad():
         for sample in tqdm(loader):
-            data = sample["X"]
+            data = sample["data"]
             data = data.to(device)
 
             node_z = node_ae.encode(data.x, data.edge_index)
