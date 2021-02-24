@@ -255,7 +255,9 @@ class LSTMDecoder(nn.Module):
         # Hidden state logic: https://discuss.pytorch.org/t/lstm-hidden-state-logic/48101
         # TODO: add gradient clipping: https://github.com/bentrevett/pytorch-seq2seq/blob/master/1%20-%20Sequence%20to%20Sequence%20Learning%20with%20Neural%20Networks.ipynb
 
-    def forward(self, x: torch.Tensor, emb: torch.Tensor, h_n: torch.Tensor, c_n: torch.Tensor):
+    def forward(
+        self, x: torch.Tensor, emb: torch.Tensor, h_n: torch.Tensor, c_n: torch.Tensor
+    ):
         """
         Parameters
         ----------
@@ -268,11 +270,11 @@ class LSTMDecoder(nn.Module):
 
         outputs = torch.zeros_like(x)  # (batch_size, seq_len, input_size)
         # print("decoder outputs.shape:", outputs.shape)
-        #x_i = h_n.view(
+        # x_i = h_n.view(
         #    batch_size, self.num_layers * self.num_directions, self.hidden_size
-        #)
-        #print("emb.shape:", emb.shape)
-        #assert emb.shape == (batch_size, 1, input_size)
+        # )
+        # print("emb.shape:", emb.shape)
+        # assert emb.shape == (batch_size, 1, input_size)
         x_i = emb.view(batch_size, 1, input_size)
 
         # print("decoder x.shape:", x.shape)
@@ -283,10 +285,10 @@ class LSTMDecoder(nn.Module):
             # print("decoder c_n.shape:", c_n.shape)
             # print("decoder x_i.shape:", x_i.shape)
             output, (h_n, c_n) = self.lstm(x_i, (h_n, c_n))
-            x_i = x[:, i].view(batch_size, 1, input_size) # Single vector has seq_len=1
+            x_i = x[:, i].view(batch_size, 1, input_size)  # Single vector has seq_len=1
             # batch_size, self.num_layers * self.num_directions, input_size
             # RuntimeError: shape '[512, 2, 10]' is invalid for input of size 5120
-            
+
             # TODO: handle bidirectional output shape: (batch, seq_len==1, num_directions * hidden_size)
             # print("decoder x_i.shape:", x_i.shape)
             # print("decoder output.shape:", output.shape) # [512, 1, 10] # 10 is ^
@@ -294,9 +296,9 @@ class LSTMDecoder(nn.Module):
             # decoder x_i.shape: torch.Size([512, 1, 10])
             # decoder output.shape: torch.Size([512, 2, 20])
             # decoder output.sqeeuze().shape torch.Size([512, 2, 20])
-            
+
             # [:, -1] handles bidirectional and num_layers
-            outputs[:, i, :] = output.squeeze()[:, :self.hidden_size]
+            outputs[:, i, :] = output.squeeze()[:, : self.hidden_size]
 
         return outputs
 
@@ -306,7 +308,7 @@ class LSTM_AE(nn.Module):
 
     def __init__(self, input_size: int, hidden_size: int, num_layers: int, **kwargs):
         super().__init__()
- 
+
         self.num_layers = num_layers
 
         self.encoder = LSTMEncoder(input_size, hidden_size, num_layers, **kwargs)
@@ -349,7 +351,7 @@ lstm_ae = LSTM_AE(
     out_channels,
     lstm_latent_dim,
     num_layers=args.lstm_num_layers,
-    bidirectional=args.bidirectional
+    bidirectional=args.bidirectional,
 )
 
 # Hardware
