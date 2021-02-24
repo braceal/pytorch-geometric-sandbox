@@ -43,6 +43,16 @@ parser.add_argument(
     default=str(Path(__file__).parent / "../../test/data/BBA-subset-100.h5"),
 )
 parser.add_argument(
+    "--lstm_num_layers",
+    type=int,
+    default=1,
+    help="Number of LSTM layers for encoder and decoder.",
+)
+parser.add_argument(
+    "--bidirectional", action="store_true", help="Whether LSTM should be bidirectional."
+)
+
+parser.add_argument(
     "--tsne_interval",
     type=int,
     default=5,
@@ -181,10 +191,10 @@ class LSTMEncoder(nn.Module):
         # print("lstm encoder x.shape:", x.shape)
         _, (h_n, c_n) = self.lstm(x)  # output, (h_n, c_n)
         # Handle bidirectional and num_layers
-        h_n, c_n = h_n[self.num_layers, ...], c_n[self.num_layers, ...]
-        # num_layers * num_directions, batch, hidden_size
         # print("enc h_n.shape:", h_n.shape)
         # print("enc c_n.shape:", c_n.shape)
+        # h_n, c_n = h_n[self.num_layers - 1, ...], c_n[self.num_layers - 1, ...]
+        # num_layers * num_directions, batch, hidden_size
         # print("enc output.shape:", output.shape)
         return h_n, c_n
 
@@ -245,7 +255,7 @@ class LSTMDecoder(nn.Module):
         # Hidden state logic: https://discuss.pytorch.org/t/lstm-hidden-state-logic/48101
         # TODO: add gradient clipping: https://github.com/bentrevett/pytorch-seq2seq/blob/master/1%20-%20Sequence%20to%20Sequence%20Learning%20with%20Neural%20Networks.ipynb
 
-    def forward(self, x: torch.Tensor, h_n: torch.Tensor, c_n: torch.Tensor):
+    def forward(self, x: torch.Tensor, emb: torch.Tensor, h_n: torch.Tensor, c_n: torch.Tensor):
         """
         Parameters
         ----------
@@ -258,9 +268,12 @@ class LSTMDecoder(nn.Module):
 
         outputs = torch.zeros_like(x)  # (batch_size, seq_len, input_size)
         # print("decoder outputs.shape:", outputs.shape)
-        x_i = h_n.view(
-            batch_size, self.num_layers * self.num_directions, self.hidden_size
-        )
+        #x_i = h_n.view(
+        #    batch_size, self.num_layers * self.num_directions, self.hidden_size
+        #)
+        #print("emb.shape:", emb.shape)
+        #assert emb.shape == (batch_size, 1, input_size)
+        x_i = emb.view(batch_size, 1, input_size)
 
         # print("decoder x.shape:", x.shape)
         # print("decoder outputs.shape:", outputs.shape)
@@ -270,15 +283,20 @@ class LSTMDecoder(nn.Module):
             # print("decoder c_n.shape:", c_n.shape)
             # print("decoder x_i.shape:", x_i.shape)
             output, (h_n, c_n) = self.lstm(x_i, (h_n, c_n))
-            x_i = x[:, i].view(
-                batch_size, self.num_layers * self.num_directions, input_size
-            )
+            x_i = x[:, i].view(batch_size, 1, input_size) # Single vector has seq_len=1
+            # batch_size, self.num_layers * self.num_directions, input_size
+            # RuntimeError: shape '[512, 2, 10]' is invalid for input of size 5120
+            
             # TODO: handle bidirectional output shape: (batch, seq_len==1, num_directions * hidden_size)
             # print("decoder x_i.shape:", x_i.shape)
-            # print("decoder output.shape:", output.shape)
-            # print("decoder output.sqeeuze().shape", output.squeeze().shape)
+            # print("decoder output.shape:", output.shape) # [512, 1, 10] # 10 is ^
+            # print("decoder output.sqeeuze().shape", output.squeeze().shape) # [512, 10]
+            # decoder x_i.shape: torch.Size([512, 1, 10])
+            # decoder output.shape: torch.Size([512, 2, 20])
+            # decoder output.sqeeuze().shape torch.Size([512, 2, 20])
+            
             # [:, -1] handles bidirectional and num_layers
-            outputs[:, i, :] = output.squeeze()[:, self.num_layers]
+            outputs[:, i, :] = output.squeeze()[:, :self.hidden_size]
 
         return outputs
 
@@ -286,20 +304,23 @@ class LSTMDecoder(nn.Module):
 class LSTM_AE(nn.Module):
     r"""LSTM Autoencoder model from: https://arxiv.org/pdf/1502.04681.pdf"""
 
-    def __init__(self, input_size: int, hidden_size: int, **kwargs):
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int, **kwargs):
         super().__init__()
+ 
+        self.num_layers = num_layers
 
-        self.encoder = LSTMEncoder(input_size, hidden_size, **kwargs)
-        self.decoder = LSTMDecoder(hidden_size, input_size, **kwargs)
+        self.encoder = LSTMEncoder(input_size, hidden_size, num_layers, **kwargs)
+        self.decoder = LSTMDecoder(hidden_size, input_size, num_layers, **kwargs)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         # print("lstm ae: x.shape:", x.shape)
         h_n, c_n = self.encoder(x)
+        emb = h_n[self.num_layers - 1, ...]
         # TODO: verify flip logic
         flipped_x = torch.flip(x, dims=(2,))
-        decoded = self.decoder(flipped_x, h_n, c_n)
+        decoded = self.decoder(flipped_x, emb, h_n, c_n)
         decoded = torch.flip(decoded, dims=(2,))
-        return h_n, decoded
+        return emb, decoded
 
 
 # Parameters
@@ -324,7 +345,12 @@ if args.variational_node:
 else:
     node_encoder = GCNEncoder(num_features, out_channels)
 node_decoder = InnerProductDecoder()
-lstm_ae = LSTM_AE(out_channels, lstm_latent_dim)
+lstm_ae = LSTM_AE(
+    out_channels,
+    lstm_latent_dim,
+    num_layers=args.lstm_num_layers,
+    bidirectional=args.bidirectional
+)
 
 # Hardware
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
