@@ -64,8 +64,8 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-def kl_loss(mu: torch.Tensor, logstd: torch.Tensor) -> torch.Tensor:
-    r"""Computes the KL loss, either for the passed arguments :obj:`mu`
+def kld_loss(mu: torch.Tensor, logstd: torch.Tensor) -> torch.Tensor:
+    r"""Computes the KLD loss, either for the passed arguments :obj:`mu`
     and :obj:`logstd`.
     Args:
         mu (Tensor): The latent space for :math:`\mu`.
@@ -110,6 +110,9 @@ def recon_loss(decoder, z, pos_edge_index, neg_edge_index=None):
     return pos_loss + neg_loss
 
 
+# TODO: refactor these GNN encoders into the same class
+
+
 class GCNEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(GCNEncoder, self).__init__()
@@ -130,12 +133,15 @@ class VariationalGCNEncoder(nn.Module):
 
     def forward(self, x, edge_index):
         x = self.conv1(x, edge_index).relu()
-        mu = self.conv_mu(x, edge_index)
-        logstd = self.conv_logstd(x, edge_index)
-        z = reparametrize(mu, logstd, self.training)
-        return z
-        # TODO: Code is broken here. Should return mu, logstd.
-        #       Should mu, or the reparametrize vector be passed on to the LSTM?
+        # Cache these for computing kld_loss
+        self.__mu__ = self.conv_mu(x, edge_index)
+        self.__logstd__ = self.conv_logstd(x, edge_index).clamp(max=MAX_LOGSTD)
+        z = reparametrize(self.__mu__, self.__logstd__, self.training)
+        return z  # Might need to return __mu__ for reconstruction loss for the lstm decoder
+        # TODO: Should mu, or the reparametrize vector be passed on to the LSTM?
+
+    def kld_loss(self) -> torch.Tensor:
+        return kld_loss(self.__mu__, self.__logstd__)
 
 
 class LSTMEncoder(nn.Module):
@@ -336,7 +342,7 @@ class LSTM_AE(nn.Module):
         emb = h_n[self.num_layers - 1, ...]
 
         if self.variational:
-            # Cache these for computing kl_loss
+            # Cache these for computing kld_loss
             self.__mu__, self.__logstd__ = self.mu(emb), self.logstd(emb)
             self.__logstd__ = self.__logstd__.clamp(max=MAX_LOGSTD)
             emb = reparametrize(self.__mu__, self.__logstd__, self.training)
@@ -358,8 +364,8 @@ class LSTM_AE(nn.Module):
         decoded = self.decode(x, emb, h_n, c_n)
         return self.__mu__ if self.variational else emb, decoded
 
-    def kl_loss(self) -> torch.Tensor:
-        return kl_loss(self.__mu__, self.__logstd__)
+    def kld_loss(self) -> torch.Tensor:
+        return kld_loss(self.__mu__, self.__logstd__)
 
 
 # Parameters
@@ -420,11 +426,7 @@ def train(epoch: int):
         data = sample["data"]
         data = data.to(device)
 
-        if args.variational_node:
-            node_z, node_logstd = node_encoder(data.x, data.edge_index)
-        else:
-            node_z = node_encoder(data.x, data.edge_index)
-
+        node_z = node_encoder(data.x, data.edge_index)
         # print("node_z.shape:", node_z.shape)
         graph_z, node_z_recon = lstm_ae(
             node_z.view(args.batch_size, num_nodes, out_channels)
@@ -434,13 +436,14 @@ def train(epoch: int):
         loss = recon_loss(
             node_decoder, node_z if args.use_node_z else node_z_recon, data.edge_index
         )
+        # TODO: try making this loss optional
         loss += node_emb_recon_criterion(node_z, node_z_recon)
 
         # Variational losses
         if args.variational_node:
-            loss += (1 / num_nodes) * kl_loss(node_z, node_logstd)
+            loss += (1 / num_nodes) * node_encoder.kld_loss()
         if args.variational_lstm:
-            loss += lstm_ae.kl_loss()
+            loss += lstm_ae.kld_loss()
 
         # print(graph_z.shape)
         # print(node_z_recon.shape)
@@ -470,10 +473,7 @@ def validate_with_rmsd():
             data = sample["data"]
             data = data.to(device)
 
-            if args.variational_node:
-                node_z, node_logstd = node_encoder(data.x, data.edge_index)
-            else:
-                node_z = node_encoder(data.x, data.edge_index)
+            node_z = node_encoder(data.x, data.edge_index)
 
             graph_z, node_z_recon = lstm_ae(
                 node_z.view(args.batch_size, num_nodes, out_channels)
@@ -490,9 +490,9 @@ def validate_with_rmsd():
 
             # Variational losses
             if args.variational_node:
-                loss += (1 / num_nodes) * kl_loss(node_z, node_logstd)
+                loss += (1 / num_nodes) * node_encoder.kld_loss()
             if args.variational_lstm:
-                loss += lstm_ae.kl_loss()
+                loss += lstm_ae.kld_loss()
 
             total_loss += loss.item()
 
