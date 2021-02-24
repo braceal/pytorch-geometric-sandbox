@@ -178,6 +178,9 @@ class LSTMEncoder(nn.Module):
         # batch_size = x.shape[0]
         # print("lstm encoder x.shape:", x.shape)
         _, (h_n, c_n) = self.lstm(x)  # output, (h_n, c_n)
+        # Handle bidirectional and num_layers
+        h_n, c_n = h_n[-1, ...], c_n[-1, ...]
+        # num_layers * num_directions, batch, hidden_size
         # print("enc h_n.shape:", h_n.shape)
         # print("enc c_n.shape:", c_n.shape)
         # print("enc output.shape:", output.shape)
@@ -272,7 +275,8 @@ class LSTMDecoder(nn.Module):
             # print("decoder x_i.shape:", x_i.shape)
             # print("decoder output.shape:", output.shape)
             # print("decoder output.sqeeuze().shape", output.squeeze().shape)
-            outputs[:, i, :] = output.squeeze()
+            # [:, -1] handles bidirectional and num_layers
+            outputs[:, i, :] = output.squeeze()[:, -1]
 
         return outputs
 
