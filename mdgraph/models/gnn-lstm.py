@@ -155,6 +155,8 @@ class LSTMEncoder(nn.Module):
         """
         super().__init__()
 
+        self.num_layers = num_layers
+
         self.lstm = nn.LSTM(
             input_size,
             hidden_size,
