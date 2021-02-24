@@ -23,6 +23,9 @@ parser.add_argument(
     "--variational_node", action="store_true", help="Use variational node encoder"
 )
 parser.add_argument(
+    "--variational_lstm", action="store_true", help="Use variational LSTM Autoencoder"
+)
+parser.add_argument(
     "--use_node_z",
     action="store_true",
     help="Compute adjacency matrix reconstruction using "
@@ -61,7 +64,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-def kl_loss(mu: torch.Tensor, logstd: torch.Tensor):
+def kl_loss(mu: torch.Tensor, logstd: torch.Tensor) -> torch.Tensor:
     r"""Computes the KL loss, either for the passed arguments :obj:`mu`
     and :obj:`logstd`.
     Args:
@@ -74,7 +77,9 @@ def kl_loss(mu: torch.Tensor, logstd: torch.Tensor):
     )
 
 
-def reparametrize(mu: torch.Tensor, logstd: torch.Tensor, training: bool = False):
+def reparametrize(
+    mu: torch.Tensor, logstd: torch.Tensor, training: bool = False
+) -> torch.Tensor:
     if training:
         return mu + torch.randn_like(logstd) * torch.exp(logstd)
     else:
@@ -129,6 +134,8 @@ class VariationalGCNEncoder(nn.Module):
         logstd = self.conv_logstd(x, edge_index)
         z = reparametrize(mu, logstd, self.training)
         return z
+        # TODO: Code is broken here. Should return mu, logstd.
+        #       Should mu, or the reparametrize vector be passed on to the LSTM?
 
 
 class LSTMEncoder(nn.Module):
@@ -177,8 +184,6 @@ class LSTMEncoder(nn.Module):
             bidirectional=bidirectional,
         )
 
-        # Hidden state logic: https://discuss.pytorch.org/t/lstm-hidden-state-logic/48101
-
     def forward(self, x: torch.Tensor):
         """
         Parameters
@@ -187,14 +192,10 @@ class LSTMEncoder(nn.Module):
             Tensor of shape BxNxD for B batches of N nodes
             by D node latent dimensions.
         """
-        # batch_size = x.shape[0]
         # print("lstm encoder x.shape:", x.shape)
         _, (h_n, c_n) = self.lstm(x)  # output, (h_n, c_n)
-        # Handle bidirectional and num_layers
         # print("enc h_n.shape:", h_n.shape)
         # print("enc c_n.shape:", c_n.shape)
-        # h_n, c_n = h_n[self.num_layers - 1, ...], c_n[self.num_layers - 1, ...]
-        # num_layers * num_directions, batch, hidden_size
         # print("enc output.shape:", output.shape)
         return h_n, c_n
 
@@ -266,15 +267,8 @@ class LSTMDecoder(nn.Module):
             by D node latent dimensions.
         """
         batch_size, seq_len, input_size = x.shape
-        assert input_size == self.input_size
 
-        outputs = torch.zeros_like(x)  # (batch_size, seq_len, input_size)
-        # print("decoder outputs.shape:", outputs.shape)
-        # x_i = h_n.view(
-        #    batch_size, self.num_layers * self.num_directions, self.hidden_size
-        # )
-        # print("emb.shape:", emb.shape)
-        # assert emb.shape == (batch_size, 1, input_size)
+        outputs = torch.zeros_like(x)
         x_i = emb.view(batch_size, 1, input_size)
 
         # print("decoder x.shape:", x.shape)
@@ -286,18 +280,11 @@ class LSTMDecoder(nn.Module):
             # print("decoder x_i.shape:", x_i.shape)
             output, (h_n, c_n) = self.lstm(x_i, (h_n, c_n))
             x_i = x[:, i].view(batch_size, 1, input_size)  # Single vector has seq_len=1
-            # batch_size, self.num_layers * self.num_directions, input_size
-            # RuntimeError: shape '[512, 2, 10]' is invalid for input of size 5120
-
-            # TODO: handle bidirectional output shape: (batch, seq_len==1, num_directions * hidden_size)
             # print("decoder x_i.shape:", x_i.shape)
             # print("decoder output.shape:", output.shape) # [512, 1, 10] # 10 is ^
             # print("decoder output.sqeeuze().shape", output.squeeze().shape) # [512, 10]
-            # decoder x_i.shape: torch.Size([512, 1, 10])
-            # decoder output.shape: torch.Size([512, 2, 20])
-            # decoder output.sqeeuze().shape torch.Size([512, 2, 20])
 
-            # [:, -1] handles bidirectional and num_layers
+            # [:, : self.hidden_size] handles bidirectional and num_layers
             outputs[:, i, :] = output.squeeze()[:, : self.hidden_size]
 
         return outputs
@@ -306,23 +293,73 @@ class LSTMDecoder(nn.Module):
 class LSTM_AE(nn.Module):
     r"""LSTM Autoencoder model from: https://arxiv.org/pdf/1502.04681.pdf"""
 
-    def __init__(self, input_size: int, hidden_size: int, num_layers: int, **kwargs):
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int,
+        variational: bool = False,
+        **kwargs,
+    ):
+        """
+        Parameters
+        ----------
+        input_size: int
+            The number of expected features in the input x.
+        hidden_size: int
+            The number of features in the hidden state h.
+        num_layers: int
+            Number of recurrent layers. E.g., setting num_layers=2 would mean
+            stacking two LSTMs together to form a stacked LSTM, with the second
+            LSTM taking in outputs of the first LSTM and computing the final
+            results. Default: 1
+        variational : bool
+            If True, becomes a variational encoder.
+        """
         super().__init__()
 
         self.num_layers = num_layers
+        self.variational = variational
 
         self.encoder = LSTMEncoder(input_size, hidden_size, num_layers, **kwargs)
         self.decoder = LSTMDecoder(hidden_size, input_size, num_layers, **kwargs)
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        # print("lstm ae: x.shape:", x.shape)
+        if self.variational:
+            self.mu = nn.Linear(hidden_size, hidden_size)
+            self.logstd = nn.Linear(hidden_size, hidden_size)
+
+    def encode(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         h_n, c_n = self.encoder(x)
+        # Handle bidirectional and num_layers
         emb = h_n[self.num_layers - 1, ...]
+
+        if self.variational:
+            # Cache these for computing kl_loss
+            self.__mu__, self.__logstd__ = self.mu(emb), self.logstd(emb)
+            self.__logstd__ = self.__logstd__.clamp(max=MAX_LOGSTD)
+            emb = reparametrize(self.__mu__, self.__logstd__, self.training)
+
+        return emb, h_n, c_n
+
+    def decode(
+        self, x: torch.Tensor, emb: torch.Tensor, h_n: torch.Tensor, c_n: torch.Tensor
+    ):
         # TODO: verify flip logic
         flipped_x = torch.flip(x, dims=(2,))
         decoded = self.decoder(flipped_x, emb, h_n, c_n)
         decoded = torch.flip(decoded, dims=(2,))
-        return emb, decoded
+        return decoded
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # print("lstm ae: x.shape:", x.shape)
+        emb, h_n, c_n = self.encode(x)
+        decoded = self.decode(x, emb, h_n, c_n)
+        return self.__mu__ if self.variational else emb, decoded
+
+    def kl_loss(self) -> torch.Tensor:
+        return kl_loss(self.__mu__, self.__logstd__)
 
 
 # Parameters
@@ -352,6 +389,7 @@ lstm_ae = LSTM_AE(
     lstm_latent_dim,
     num_layers=args.lstm_num_layers,
     bidirectional=args.bidirectional,
+    variational=args.variational_lstm,
 )
 
 # Hardware
@@ -401,8 +439,10 @@ def train(epoch: int):
         # Variational losses
         if args.variational_node:
             loss += (1 / num_nodes) * kl_loss(node_z, node_logstd)
+        if args.variational_lstm:
+            loss += lstm_ae.kl_loss()
 
-        # print(graph_emb.shape)
+        # print(graph_z.shape)
         # print(node_z_recon.shape)
 
         loss.backward()
@@ -451,6 +491,8 @@ def validate_with_rmsd():
             # Variational losses
             if args.variational_node:
                 loss += (1 / num_nodes) * kl_loss(node_z, node_logstd)
+            if args.variational_lstm:
+                loss += lstm_ae.kl_loss()
 
             total_loss += loss.item()
 
