@@ -8,8 +8,9 @@ from collections import defaultdict
 from typing import Tuple
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.utils.data import random_split
-from torch_geometric.nn import GCNConv, InnerProductDecoder
+from torch_geometric.nn import GCNConv, GATConv, InnerProductDecoder
 from torch_geometric.utils import negative_sampling, remove_self_loops, add_self_loops
 from torch_geometric.data import DataLoader
 from mdgraph.data.dataset import ContactMapDataset
@@ -24,6 +25,9 @@ parser.add_argument(
 )
 parser.add_argument(
     "--variational_lstm", action="store_true", help="Use variational LSTM Autoencoder"
+)
+parser.add_argument(
+    "--graph_attention", action="store_true", help="Use GAT network for node encoder."
 )
 parser.add_argument(
     "--use_node_z",
@@ -122,6 +126,21 @@ class GCNEncoder(nn.Module):
     def forward(self, x, edge_index):
         x = self.conv1(x, edge_index).relu()
         return self.conv2(x, edge_index)
+
+
+class GATEncoder(nn.Module):
+    def __init__(self, num_features: int, out_channels: int):
+        super(GATEncoder, self).__init__()
+
+        self.conv1 = GATConv(num_features, 8, heads=8, dropout=0.6)
+        self.conv2 = GATConv(8 * 8, out_channels, heads=1, concat=False, dropout=0.6)
+
+    def forward(self, x, edge_index):
+        x = F.dropout(x, p=0.6, training=self.training)
+        x = F.elu(self.conv1(x, edge_index))
+        x = F.dropout(x, p=0.6, training=self.training)
+        x = self.conv2(x, edge_index)
+        return x
 
 
 class VariationalGCNEncoder(nn.Module):
@@ -387,6 +406,8 @@ num_nodes = dataset.num_nodes
 # Models
 if args.variational_node:
     node_encoder = VariationalGCNEncoder(num_features, out_channels)
+elif args.graph_attention:
+    node_encoder = GATEncoder(num_features, out_channels)
 else:
     node_encoder = GCNEncoder(num_features, out_channels)
 node_decoder = InnerProductDecoder()
