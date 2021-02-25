@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
-from typing import Tuple
+from typing import Tuple, Dict
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -96,7 +96,7 @@ def reparametrize(
         return mu
 
 
-def recon_loss(decoder, z, pos_edge_index, neg_edge_index=None):
+def recon_loss(decoder, z, pos_edge_index, neg_edge_index=None) -> torch.Tensor:
     r"""Given latent variables :obj:`z`, computes the binary cross
     entropy loss for positive edges :obj:`pos_edge_index` and negative
     sampled edges.
@@ -129,7 +129,7 @@ class GCNEncoder(nn.Module):
         self.conv1 = GCNConv(in_channels, 2 * out_channels)
         self.conv2 = GCNConv(2 * out_channels, out_channels)
 
-    def forward(self, x, edge_index):
+    def forward(self, x, edge_index) -> torch.Tensor:
         x = self.conv1(x, edge_index).relu()
         return self.conv2(x, edge_index)
 
@@ -141,7 +141,7 @@ class GATEncoder(nn.Module):
         self.conv1 = GATConv(num_features, 8, heads=8, dropout=0.6)
         self.conv2 = GATConv(8 * 8, out_channels, heads=1, concat=False, dropout=0.6)
 
-    def forward(self, x, edge_index):
+    def forward(self, x, edge_index) -> torch.Tensor:
         x = F.dropout(x, p=0.6, training=self.training)
         x = F.elu(self.conv1(x, edge_index))
         x = F.dropout(x, p=0.6, training=self.training)
@@ -156,7 +156,7 @@ class VariationalGCNEncoder(nn.Module):
         self.conv_mu = GCNConv(2 * out_channels, out_channels)
         self.conv_logstd = GCNConv(2 * out_channels, out_channels)
 
-    def forward(self, x, edge_index):
+    def forward(self, x, edge_index) -> torch.Tensor:
         x = self.conv1(x, edge_index).relu()
         # Cache these for computing kld_loss
         self.__mu__ = self.conv_mu(x, edge_index)
@@ -215,7 +215,7 @@ class LSTMEncoder(nn.Module):
             bidirectional=bidirectional,
         )
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Parameters
         ----------
@@ -289,7 +289,7 @@ class LSTMDecoder(nn.Module):
 
     def forward(
         self, x: torch.Tensor, emb: torch.Tensor, h_n: torch.Tensor, c_n: torch.Tensor
-    ):
+    ) -> torch.Tensor:
         """
         Parameters
         ----------
@@ -376,7 +376,7 @@ class LSTM_AE(nn.Module):
 
     def decode(
         self, x: torch.Tensor, emb: torch.Tensor, h_n: torch.Tensor, c_n: torch.Tensor
-    ):
+    ) -> torch.Tensor:
         # TODO: verify flip logic
         flipped_x = torch.flip(x, dims=(2,))
         decoded = self.decoder(flipped_x, emb, h_n, c_n)
@@ -441,7 +441,7 @@ optimizer = torch.optim.Adam(
 node_emb_recon_criterion = nn.MSELoss()
 
 
-def train(epoch: int):
+def train(epoch: int) -> float:
     node_encoder.train()
     node_decoder.train()
     lstm_ae.train()
@@ -489,7 +489,7 @@ def train(epoch: int):
     return total_loss
 
 
-def validate_with_rmsd():
+def validate_with_rmsd() -> Tuple[Dict[str, np.ndarray], float]:
     node_encoder.eval()
     node_decoder.eval()
     lstm_ae.eval()
@@ -551,7 +551,7 @@ def validate_with_rmsd():
     return output, total_loss
 
 
-def validate(epoch: int):
+def validate(epoch: int) -> float:
 
     output, total_loss = validate_with_rmsd()
 
