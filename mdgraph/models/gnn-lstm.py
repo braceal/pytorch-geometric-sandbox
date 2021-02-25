@@ -65,6 +65,12 @@ parser.add_argument(
     default=5,
     help="Run t-SNE every `tsne_interval` epochs.",
 )
+parser.add_argument(
+    "--run_dir",
+    type=str,
+    default="./test_plots",
+    help="Output directory for model results.",
+)
 args = parser.parse_args()
 
 
@@ -560,7 +566,7 @@ def validate(epoch: int):
         embeddings=output["graph_embeddings"][random_sample],
         paint=output["rmsd"][random_sample],
         paint_name="rmsd",
-        plot_dir=Path("./test_plots"),
+        plot_dir=Path(args.run_dir),
         plot_name=f"epoch-{epoch}-graph_embeddings",
     )
 
@@ -571,7 +577,7 @@ def validate(epoch: int):
         embeddings=output["node_embeddings"][random_sample],
         paint=output["node_labels"][random_sample],
         paint_name="node_labels",
-        plot_dir=Path("./test_plots"),
+        plot_dir=Path(args.run_dir),
         plot_name=f"epoch-{epoch}-node_embeddings",
     )
 
