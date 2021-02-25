@@ -8,8 +8,9 @@ from collections import defaultdict
 from typing import Tuple
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.utils.data import random_split
-from torch_geometric.nn import GCNConv, InnerProductDecoder
+from torch_geometric.nn import GCNConv, GATConv, InnerProductDecoder
 from torch_geometric.utils import negative_sampling, remove_self_loops, add_self_loops
 from torch_geometric.data import DataLoader
 from mdgraph.data.dataset import ContactMapDataset
@@ -21,6 +22,12 @@ MAX_LOGSTD = 10
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--variational_node", action="store_true", help="Use variational node encoder"
+)
+parser.add_argument(
+    "--variational_lstm", action="store_true", help="Use variational LSTM Autoencoder"
+)
+parser.add_argument(
+    "--graph_attention", action="store_true", help="Use GAT network for node encoder."
 )
 parser.add_argument(
     "--use_node_z",
@@ -58,11 +65,17 @@ parser.add_argument(
     default=5,
     help="Run t-SNE every `tsne_interval` epochs.",
 )
+parser.add_argument(
+    "--run_dir",
+    type=str,
+    default="./test_plots",
+    help="Output directory for model results.",
+)
 args = parser.parse_args()
 
 
-def kl_loss(mu: torch.Tensor, logstd: torch.Tensor):
-    r"""Computes the KL loss, either for the passed arguments :obj:`mu`
+def kld_loss(mu: torch.Tensor, logstd: torch.Tensor) -> torch.Tensor:
+    r"""Computes the KLD loss, either for the passed arguments :obj:`mu`
     and :obj:`logstd`.
     Args:
         mu (Tensor): The latent space for :math:`\mu`.
@@ -74,7 +87,9 @@ def kl_loss(mu: torch.Tensor, logstd: torch.Tensor):
     )
 
 
-def reparametrize(mu: torch.Tensor, logstd: torch.Tensor, training: bool = False):
+def reparametrize(
+    mu: torch.Tensor, logstd: torch.Tensor, training: bool = False
+) -> torch.Tensor:
     if training:
         return mu + torch.randn_like(logstd) * torch.exp(logstd)
     else:
@@ -105,6 +120,9 @@ def recon_loss(decoder, z, pos_edge_index, neg_edge_index=None):
     return pos_loss + neg_loss
 
 
+# TODO: refactor these GNN encoders into the same class
+
+
 class GCNEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(GCNEncoder, self).__init__()
@@ -116,6 +134,21 @@ class GCNEncoder(nn.Module):
         return self.conv2(x, edge_index)
 
 
+class GATEncoder(nn.Module):
+    def __init__(self, num_features: int, out_channels: int):
+        super(GATEncoder, self).__init__()
+
+        self.conv1 = GATConv(num_features, 8, heads=8, dropout=0.6)
+        self.conv2 = GATConv(8 * 8, out_channels, heads=1, concat=False, dropout=0.6)
+
+    def forward(self, x, edge_index):
+        x = F.dropout(x, p=0.6, training=self.training)
+        x = F.elu(self.conv1(x, edge_index))
+        x = F.dropout(x, p=0.6, training=self.training)
+        x = self.conv2(x, edge_index)
+        return x
+
+
 class VariationalGCNEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(VariationalGCNEncoder, self).__init__()
@@ -125,10 +158,15 @@ class VariationalGCNEncoder(nn.Module):
 
     def forward(self, x, edge_index):
         x = self.conv1(x, edge_index).relu()
-        mu = self.conv_mu(x, edge_index)
-        logstd = self.conv_logstd(x, edge_index)
-        z = reparametrize(mu, logstd, self.training)
-        return z
+        # Cache these for computing kld_loss
+        self.__mu__ = self.conv_mu(x, edge_index)
+        self.__logstd__ = self.conv_logstd(x, edge_index).clamp(max=MAX_LOGSTD)
+        z = reparametrize(self.__mu__, self.__logstd__, self.training)
+        return z  # Might need to return __mu__ for reconstruction loss for the lstm decoder
+        # TODO: Should mu, or the reparametrize vector be passed on to the LSTM?
+
+    def kld_loss(self) -> torch.Tensor:
+        return kld_loss(self.__mu__, self.__logstd__)
 
 
 class LSTMEncoder(nn.Module):
@@ -177,8 +215,6 @@ class LSTMEncoder(nn.Module):
             bidirectional=bidirectional,
         )
 
-        # Hidden state logic: https://discuss.pytorch.org/t/lstm-hidden-state-logic/48101
-
     def forward(self, x: torch.Tensor):
         """
         Parameters
@@ -187,14 +223,10 @@ class LSTMEncoder(nn.Module):
             Tensor of shape BxNxD for B batches of N nodes
             by D node latent dimensions.
         """
-        # batch_size = x.shape[0]
         # print("lstm encoder x.shape:", x.shape)
         _, (h_n, c_n) = self.lstm(x)  # output, (h_n, c_n)
-        # Handle bidirectional and num_layers
         # print("enc h_n.shape:", h_n.shape)
         # print("enc c_n.shape:", c_n.shape)
-        # h_n, c_n = h_n[self.num_layers - 1, ...], c_n[self.num_layers - 1, ...]
-        # num_layers * num_directions, batch, hidden_size
         # print("enc output.shape:", output.shape)
         return h_n, c_n
 
@@ -266,15 +298,8 @@ class LSTMDecoder(nn.Module):
             by D node latent dimensions.
         """
         batch_size, seq_len, input_size = x.shape
-        assert input_size == self.input_size
 
-        outputs = torch.zeros_like(x)  # (batch_size, seq_len, input_size)
-        # print("decoder outputs.shape:", outputs.shape)
-        # x_i = h_n.view(
-        #    batch_size, self.num_layers * self.num_directions, self.hidden_size
-        # )
-        # print("emb.shape:", emb.shape)
-        # assert emb.shape == (batch_size, 1, input_size)
+        outputs = torch.zeros_like(x)
         x_i = emb.view(batch_size, 1, input_size)
 
         # print("decoder x.shape:", x.shape)
@@ -286,18 +311,11 @@ class LSTMDecoder(nn.Module):
             # print("decoder x_i.shape:", x_i.shape)
             output, (h_n, c_n) = self.lstm(x_i, (h_n, c_n))
             x_i = x[:, i].view(batch_size, 1, input_size)  # Single vector has seq_len=1
-            # batch_size, self.num_layers * self.num_directions, input_size
-            # RuntimeError: shape '[512, 2, 10]' is invalid for input of size 5120
-
-            # TODO: handle bidirectional output shape: (batch, seq_len==1, num_directions * hidden_size)
             # print("decoder x_i.shape:", x_i.shape)
             # print("decoder output.shape:", output.shape) # [512, 1, 10] # 10 is ^
             # print("decoder output.sqeeuze().shape", output.squeeze().shape) # [512, 10]
-            # decoder x_i.shape: torch.Size([512, 1, 10])
-            # decoder output.shape: torch.Size([512, 2, 20])
-            # decoder output.sqeeuze().shape torch.Size([512, 2, 20])
 
-            # [:, -1] handles bidirectional and num_layers
+            # [:, : self.hidden_size] handles bidirectional and num_layers
             outputs[:, i, :] = output.squeeze()[:, : self.hidden_size]
 
         return outputs
@@ -306,23 +324,73 @@ class LSTMDecoder(nn.Module):
 class LSTM_AE(nn.Module):
     r"""LSTM Autoencoder model from: https://arxiv.org/pdf/1502.04681.pdf"""
 
-    def __init__(self, input_size: int, hidden_size: int, num_layers: int, **kwargs):
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int,
+        variational: bool = False,
+        **kwargs,
+    ):
+        """
+        Parameters
+        ----------
+        input_size: int
+            The number of expected features in the input x.
+        hidden_size: int
+            The number of features in the hidden state h.
+        num_layers: int
+            Number of recurrent layers. E.g., setting num_layers=2 would mean
+            stacking two LSTMs together to form a stacked LSTM, with the second
+            LSTM taking in outputs of the first LSTM and computing the final
+            results. Default: 1
+        variational : bool
+            If True, becomes a variational encoder.
+        """
         super().__init__()
 
         self.num_layers = num_layers
+        self.variational = variational
 
         self.encoder = LSTMEncoder(input_size, hidden_size, num_layers, **kwargs)
         self.decoder = LSTMDecoder(hidden_size, input_size, num_layers, **kwargs)
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        # print("lstm ae: x.shape:", x.shape)
+        if self.variational:
+            self.mu = nn.Linear(hidden_size, hidden_size)
+            self.logstd = nn.Linear(hidden_size, hidden_size)
+
+    def encode(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         h_n, c_n = self.encoder(x)
+        # Handle bidirectional and num_layers
         emb = h_n[self.num_layers - 1, ...]
+
+        if self.variational:
+            # Cache these for computing kld_loss
+            self.__mu__, self.__logstd__ = self.mu(emb), self.logstd(emb)
+            self.__logstd__ = self.__logstd__.clamp(max=MAX_LOGSTD)
+            emb = reparametrize(self.__mu__, self.__logstd__, self.training)
+
+        return emb, h_n, c_n
+
+    def decode(
+        self, x: torch.Tensor, emb: torch.Tensor, h_n: torch.Tensor, c_n: torch.Tensor
+    ):
         # TODO: verify flip logic
         flipped_x = torch.flip(x, dims=(2,))
         decoded = self.decoder(flipped_x, emb, h_n, c_n)
         decoded = torch.flip(decoded, dims=(2,))
-        return emb, decoded
+        return decoded
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # print("lstm ae: x.shape:", x.shape)
+        emb, h_n, c_n = self.encode(x)
+        decoded = self.decode(x, emb, h_n, c_n)
+        return self.__mu__ if self.variational else emb, decoded
+
+    def kld_loss(self) -> torch.Tensor:
+        return kld_loss(self.__mu__, self.__logstd__)
 
 
 # Parameters
@@ -344,6 +412,8 @@ num_nodes = dataset.num_nodes
 # Models
 if args.variational_node:
     node_encoder = VariationalGCNEncoder(num_features, out_channels)
+elif args.graph_attention:
+    node_encoder = GATEncoder(num_features, out_channels)
 else:
     node_encoder = GCNEncoder(num_features, out_channels)
 node_decoder = InnerProductDecoder()
@@ -352,6 +422,7 @@ lstm_ae = LSTM_AE(
     lstm_latent_dim,
     num_layers=args.lstm_num_layers,
     bidirectional=args.bidirectional,
+    variational=args.variational_lstm,
 )
 
 # Hardware
@@ -382,11 +453,7 @@ def train(epoch: int):
         data = sample["data"]
         data = data.to(device)
 
-        if args.variational_node:
-            node_z, node_logstd = node_encoder(data.x, data.edge_index)
-        else:
-            node_z = node_encoder(data.x, data.edge_index)
-
+        node_z = node_encoder(data.x, data.edge_index)
         # print("node_z.shape:", node_z.shape)
         graph_z, node_z_recon = lstm_ae(
             node_z.view(args.batch_size, num_nodes, out_channels)
@@ -396,13 +463,16 @@ def train(epoch: int):
         loss = recon_loss(
             node_decoder, node_z if args.use_node_z else node_z_recon, data.edge_index
         )
+        # TODO: try making this loss optional
         loss += node_emb_recon_criterion(node_z, node_z_recon)
 
         # Variational losses
         if args.variational_node:
-            loss += (1 / num_nodes) * kl_loss(node_z, node_logstd)
+            loss += (1 / num_nodes) * node_encoder.kld_loss()
+        if args.variational_lstm:
+            loss += lstm_ae.kld_loss()
 
-        # print(graph_emb.shape)
+        # print(graph_z.shape)
         # print(node_z_recon.shape)
 
         loss.backward()
@@ -430,10 +500,7 @@ def validate_with_rmsd():
             data = sample["data"]
             data = data.to(device)
 
-            if args.variational_node:
-                node_z, node_logstd = node_encoder(data.x, data.edge_index)
-            else:
-                node_z = node_encoder(data.x, data.edge_index)
+            node_z = node_encoder(data.x, data.edge_index)
 
             graph_z, node_z_recon = lstm_ae(
                 node_z.view(args.batch_size, num_nodes, out_channels)
@@ -450,7 +517,9 @@ def validate_with_rmsd():
 
             # Variational losses
             if args.variational_node:
-                loss += (1 / num_nodes) * kl_loss(node_z, node_logstd)
+                loss += (1 / num_nodes) * node_encoder.kld_loss()
+            if args.variational_lstm:
+                loss += lstm_ae.kld_loss()
 
             total_loss += loss.item()
 
@@ -497,7 +566,7 @@ def validate(epoch: int):
         embeddings=output["graph_embeddings"][random_sample],
         paint=output["rmsd"][random_sample],
         paint_name="rmsd",
-        plot_dir=Path("./test_plots"),
+        plot_dir=Path(args.run_dir),
         plot_name=f"epoch-{epoch}-graph_embeddings",
     )
 
@@ -508,7 +577,7 @@ def validate(epoch: int):
         embeddings=output["node_embeddings"][random_sample],
         paint=output["node_labels"][random_sample],
         paint_name="node_labels",
-        plot_dir=Path("./test_plots"),
+        plot_dir=Path(args.run_dir),
         plot_name=f"epoch-{epoch}-node_embeddings",
     )
 
