@@ -45,5 +45,5 @@ def log_args(args_dict: dict, out_file: Path):
         if isinstance(val, Path):
             args[key] = str(val)
 
-    with open("commandline_args.txt", "w") as f:
+    with open(out_file, "w") as f:
         json.dump(args, f, indent=2)
