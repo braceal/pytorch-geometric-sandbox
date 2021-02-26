@@ -14,7 +14,7 @@ from torch_geometric.nn import GCNConv, GATConv, InnerProductDecoder
 from torch_geometric.utils import negative_sampling, remove_self_loops, add_self_loops
 from torch_geometric.data import DataLoader
 from mdgraph.data.dataset import ContactMapDataset
-from mdgraph.utils import tsne_validation
+from mdgraph.utils import tsne_validation, log_epoch_stats, log_checkpoint, log_args
 
 EPS = 1e-15
 MAX_LOGSTD = 10
@@ -67,7 +67,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--run_dir",
-    type=str,
+    type=Path,
     default="./test_plots",
     help="Output directory for model results.",
 )
@@ -398,6 +398,12 @@ out_channels = 10
 num_features = 20
 lstm_latent_dim = 10
 
+# Setup run
+args.run_dir.mkdir()
+args.run_dir.joinpath("checkpoints").mkdir()
+args.run_dir.joinpath("plots").mkdir()
+log_args(args.__dict__, args.run_dir.joinpath("args.json"))
+
 # Data
 dataset = ContactMapDataset(args.data_path, "contact_map", ["rmsd"])
 lengths = [
@@ -448,6 +454,8 @@ def train(epoch: int) -> float:
 
     total_loss = 0.0
     for i, sample in enumerate(train_loader):
+        # if i == 5:
+        #    break
         start = time.time()
         optimizer.zero_grad()
         data = sample["data"]
@@ -495,6 +503,7 @@ def validate_with_rmsd() -> Tuple[Dict[str, np.ndarray], float]:
     lstm_ae.eval()
     output = defaultdict(list)
     total_loss = 0.0
+    # return None, total_loss
     with torch.no_grad():
         for sample in tqdm(valid_loader):
             data = sample["data"]
@@ -566,7 +575,7 @@ def validate(epoch: int) -> float:
         embeddings=output["graph_embeddings"][random_sample],
         paint=output["rmsd"][random_sample],
         paint_name="rmsd",
-        plot_dir=Path(args.run_dir),
+        plot_dir=args.run_dir.joinpath("plots"),
         plot_name=f"epoch-{epoch}-graph_embeddings",
     )
 
@@ -577,7 +586,7 @@ def validate(epoch: int) -> float:
         embeddings=output["node_embeddings"][random_sample],
         paint=output["node_labels"][random_sample],
         paint_name="node_labels",
-        plot_dir=Path(args.run_dir),
+        plot_dir=args.run_dir.joinpath("plots"),
         plot_name=f"epoch-{epoch}-node_embeddings",
     )
 
@@ -587,4 +596,18 @@ def validate(epoch: int) -> float:
 for epoch in range(1, args.epochs + 1):
     train_loss = train(epoch)
     valid_loss = validate(epoch)
+    log_epoch_stats(
+        epoch,
+        {"train_loss": train_loss, "valid_loss": valid_loss},
+        args.run_dir.joinpath("loss.csv"),
+    )
+    log_checkpoint(
+        epoch,
+        {
+            "node_encoder_state_dict": node_encoder.state_dict(),
+            "lstm_ae_state_dict": lstm_ae.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+        },
+        args.run_dir.joinpath("checkpoints"),
+    )
     print(f"Epoch: {epoch:03d}\t Train Loss: {train_loss} Valid Loss: {valid_loss}")
