@@ -14,7 +14,7 @@ from torch_geometric.nn import GCNConv, GATConv, InnerProductDecoder
 from torch_geometric.utils import negative_sampling, remove_self_loops, add_self_loops
 from torch_geometric.data import DataLoader
 from mdgraph.data.dataset import ContactMapDataset
-from mdgraph.utils import tsne_validation, log_epoch_stats, log_checkpoint
+from mdgraph.utils import tsne_validation, log_epoch_stats, log_checkpoint, log_args
 
 EPS = 1e-15
 MAX_LOGSTD = 10
@@ -402,6 +402,7 @@ lstm_latent_dim = 10
 args.run_dir.mkdir()
 args.run_dir.joinpath("checkpoints").mkdir()
 args.run_dir.joinpath("plots").mkdir()
+log_args(args.__dict__, args.run_dir.joinpath("args.json"))
 
 # Data
 dataset = ContactMapDataset(args.data_path, "contact_map", ["rmsd"])

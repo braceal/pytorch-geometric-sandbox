@@ -1,4 +1,5 @@
 import time
+import json
 from pathlib import Path
 from typing import Dict, Any
 import torch
@@ -33,3 +34,9 @@ def log_checkpoint(epoch, checkpoint: Dict[str, Any], checkpoint_dir: Path):
     time_stamp = time.strftime(f"epoch-{epoch}-%Y%m%d-%H%M%S.pt")
     path = checkpoint_dir.joinpath(time_stamp)
     torch.save(checkpoint, path)
+
+
+def log_args(args_dict: dict, out_file: Path):
+    """Save file containing argparse commands for documenting runs."""
+    with open("commandline_args.txt", "w") as f:
+        json.dump(args_dict, f, indent=2)
