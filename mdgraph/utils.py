@@ -1,4 +1,8 @@
 import time
+from pathlib import Path
+from typing import Dict, Any
+import torch
+import pandas as pd
 from plotly.io import to_html
 from molecules.plot.tsne import compute_tsne, plot_tsne_plotly
 
@@ -13,3 +17,19 @@ def tsne_validation(embeddings, paint, paint_name, plot_dir, plot_name):
     time_stamp = time.strftime(f"{plot_name}-%Y%m%d-%H%M%S.html")
     with open(plot_dir.joinpath(time_stamp), "w") as f:
         f.write(html_string)
+
+
+def log_epoch_stats(epoch: int, stats: Dict[str, float], out_file: Path):
+    df = pd.DataFrame({key: [val] for key, val in stats.items()})
+    df["epoch"] = [epoch]
+    df.set_index("epoch", inplace=True)
+    if epoch == 1:
+        df.to_csv(out_file)
+    else:
+        df.to_csv(out_file, mode="a", header=False)
+
+
+def log_checkpoint(epoch, checkpoint: Dict[str, Any], checkpoint_dir: Path):
+    time_stamp = time.strftime(f"epoch-{epoch}-%Y%m%d-%H%M%S.pt")
+    path = checkpoint_dir.joinpath(time_stamp)
+    torch.save(checkpoint, path)

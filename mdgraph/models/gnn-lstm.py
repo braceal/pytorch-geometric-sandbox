@@ -3,7 +3,6 @@ import argparse
 from itertools import chain
 from pathlib import Path
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
 from typing import Tuple, Dict
@@ -15,7 +14,7 @@ from torch_geometric.nn import GCNConv, GATConv, InnerProductDecoder
 from torch_geometric.utils import negative_sampling, remove_self_loops, add_self_loops
 from torch_geometric.data import DataLoader
 from mdgraph.data.dataset import ContactMapDataset
-from mdgraph.utils import tsne_validation
+from mdgraph.utils import tsne_validation, log_epoch_stats, log_checkpoint
 
 EPS = 1e-15
 MAX_LOGSTD = 10
@@ -73,16 +72,6 @@ parser.add_argument(
     help="Output directory for model results.",
 )
 args = parser.parse_args()
-
-
-def log_epoch_stats(epoch: int, stats: Dict[str, float], out_file: Path):
-    df = pd.DataFrame({key: [val] for key, val in stats.items()})
-    df["epoch"] = [epoch]
-    df.set_index("epoch", inplace=True)
-    if epoch == 1:
-        df.to_csv(out_file)
-    else:
-        df.to_csv(out_file, mode="a", header=False)
 
 
 def kld_loss(mu: torch.Tensor, logstd: torch.Tensor) -> torch.Tensor:
@@ -585,7 +574,7 @@ def validate(epoch: int) -> float:
         embeddings=output["graph_embeddings"][random_sample],
         paint=output["rmsd"][random_sample],
         paint_name="rmsd",
-        plot_dir=Path(args.run_dir),
+        plot_dir=args.run_dir.joinpath("plots"),
         plot_name=f"epoch-{epoch}-graph_embeddings",
     )
 
@@ -596,7 +585,7 @@ def validate(epoch: int) -> float:
         embeddings=output["node_embeddings"][random_sample],
         paint=output["node_labels"][random_sample],
         paint_name="node_labels",
-        plot_dir=Path(args.run_dir),
+        plot_dir=args.run_dir.joinpath("plots"),
         plot_name=f"epoch-{epoch}-node_embeddings",
     )
 
@@ -610,5 +599,14 @@ for epoch in range(1, args.epochs + 1):
         epoch,
         {"train_loss": train_loss, "valid_loss": valid_loss},
         args.run_dir.joinpath("loss.csv"),
+    )
+    log_checkpoint(
+        epoch,
+        {
+            "node_encoder_state_dict": node_encoder.state_dict(),
+            "lstm_ae_state_dict": lstm_ae.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+        },
+        args.run_dir.joinpath("checkpoints"),
     )
     print(f"Epoch: {epoch:03d}\t Train Loss: {train_loss} Valid Loss: {valid_loss}")
