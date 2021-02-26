@@ -76,8 +76,9 @@ args = parser.parse_args()
 
 
 def log_epoch_stats(epoch: int, stats: Dict[str, float], out_file: Path):
-    df = pd.DataFrame(stats)
+    df = pd.DataFrame({key: [val] for key, val in stats.items()})
     df["epoch"] = [epoch]
+    df.set_index("epoch", inplace=True)
     if epoch == 1:
         df.to_csv(out_file)
     else:
@@ -463,6 +464,8 @@ def train(epoch: int) -> float:
 
     total_loss = 0.0
     for i, sample in enumerate(train_loader):
+        #if i == 5:
+        #    break
         start = time.time()
         optimizer.zero_grad()
         data = sample["data"]
@@ -509,7 +512,8 @@ def validate_with_rmsd() -> Tuple[Dict[str, np.ndarray], float]:
     node_decoder.eval()
     lstm_ae.eval()
     output = defaultdict(list)
-    total_loss = 0.0
+    #total_loss = 0.0
+    #return None, total_loss
     with torch.no_grad():
         for sample in tqdm(valid_loader):
             data = sample["data"]
