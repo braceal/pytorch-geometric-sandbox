@@ -3,6 +3,7 @@ import argparse
 from itertools import chain
 from pathlib import Path
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
 from typing import Tuple, Dict
@@ -67,11 +68,20 @@ parser.add_argument(
 )
 parser.add_argument(
     "--run_dir",
-    type=str,
+    type=Path,
     default="./test_plots",
     help="Output directory for model results.",
 )
 args = parser.parse_args()
+
+
+def log_epoch_stats(epoch: int, stats: Dict[str, float], out_file: Path):
+    df = pd.DataFrame(stats)
+    df["epoch"] = [epoch]
+    if epoch == 1:
+        df.to_csv(out_file)
+    else:
+        df.to_csv(out_file, mode="a", header=False)
 
 
 def kld_loss(mu: torch.Tensor, logstd: torch.Tensor) -> torch.Tensor:
@@ -398,6 +408,11 @@ out_channels = 10
 num_features = 20
 lstm_latent_dim = 10
 
+# Setup run
+args.run_dir.mkdir()
+args.run_dir.joinpath("checkpoints").mkdir()
+args.run_dir.joinpath("plots").mkdir()
+
 # Data
 dataset = ContactMapDataset(args.data_path, "contact_map", ["rmsd"])
 lengths = [
@@ -587,4 +602,9 @@ def validate(epoch: int) -> float:
 for epoch in range(1, args.epochs + 1):
     train_loss = train(epoch)
     valid_loss = validate(epoch)
+    log_epoch_stats(
+        epoch,
+        {"train_loss": train_loss, "valid_loss": valid_loss},
+        args.run_dir.joinpath("loss.csv"),
+    )
     print(f"Epoch: {epoch:03d}\t Train Loss: {train_loss} Valid Loss: {valid_loss}")
