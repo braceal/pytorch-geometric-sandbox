@@ -38,5 +38,12 @@ def log_checkpoint(epoch, checkpoint: Dict[str, Any], checkpoint_dir: Path):
 
 def log_args(args_dict: dict, out_file: Path):
     """Save file containing argparse commands for documenting runs."""
+
+    # Handle non-JSON serializable args
+    args = args_dict.copy()
+    for key, val in args_dict.items():
+        if isinstance(val, Path):
+            args[key] = str(val)
+
     with open("commandline_args.txt", "w") as f:
-        json.dump(args_dict, f, indent=2)
+        json.dump(args, f, indent=2)
