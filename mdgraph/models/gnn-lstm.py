@@ -30,6 +30,9 @@ parser.add_argument(
     "--graph_attention", action="store_true", help="Use GAT network for node encoder."
 )
 parser.add_argument(
+    "--node_recon_loss", action="store_true", help="Add node embedding reconstruction loss."
+)
+parser.add_argument(
     "--use_node_z",
     action="store_true",
     help="Compute adjacency matrix reconstruction using "
@@ -471,8 +474,8 @@ def train(epoch: int) -> float:
         loss = recon_loss(
             node_decoder, node_z if args.use_node_z else node_z_recon, data.edge_index
         )
-        # TODO: try making this loss optional
-        loss += node_emb_recon_criterion(node_z, node_z_recon)
+        if args.node_recon_loss:
+            loss += node_emb_recon_criterion(node_z, node_z_recon)
 
         # Variational losses
         if args.variational_node:
@@ -487,10 +490,11 @@ def train(epoch: int) -> float:
         optimizer.step()
         total_loss += loss.item()
 
-        print(
-            f"Training Epoch: {epoch} Batch: {i}/{len(train_loader)} "
-            f"Loss: {total_loss / (i + 1)} Batch time: {time.time() - start}"
-        )
+        if i % 100 == 0:
+            print(
+                f"Training Epoch: {epoch} Batch: {i}/{len(train_loader)} "
+                f"Loss: {total_loss / (i + 1)} Batch time: {time.time() - start}"
+            )
 
     total_loss /= len(train_loader)
 
@@ -505,7 +509,7 @@ def validate_with_rmsd() -> Tuple[Dict[str, np.ndarray], float]:
     total_loss = 0.0
     # return None, total_loss
     with torch.no_grad():
-        for sample in tqdm(valid_loader):
+        for sample in valid_loader:
             data = sample["data"]
             data = data.to(device)
 
@@ -522,7 +526,8 @@ def validate_with_rmsd() -> Tuple[Dict[str, np.ndarray], float]:
                 node_z if args.use_node_z else node_z_recon,
                 data.edge_index,
             )
-            loss += node_emb_recon_criterion(node_z, node_z_recon)
+            if args.node_recon_loss:
+                loss += node_emb_recon_criterion(node_z, node_z_recon)
 
             # Variational losses
             if args.variational_node:
