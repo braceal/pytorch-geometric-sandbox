@@ -61,7 +61,8 @@ def generate_embeddings(
     lstm_ae.load_state_dict(checkpoint["lstm_ae_state_dict"])
 
     # Hardware
-    device = torch.device("cpu") #torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     node_encoder = node_encoder.to(device)
     node_decoder = node_decoder.to(device)
     lstm_ae = lstm_ae.to(device)

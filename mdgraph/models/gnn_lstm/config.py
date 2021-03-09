@@ -77,6 +77,7 @@ def get_parser():
 
     return parser
 
+
 def get_args():
     parser = get_parser()
     args = parser.parse_args()
@@ -84,7 +85,7 @@ def get_args():
 
 
 def args_from_json(args_json: PathLike):
-    parser = get_parser() #argparse.ArgumentParser()
+    parser = get_parser()  # argparse.ArgumentParser()
     with open(args_json, "r") as f:
         t_args = argparse.Namespace()
         t_args.__dict__.update(json.load(f))
