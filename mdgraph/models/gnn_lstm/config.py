@@ -6,7 +6,7 @@ from pathlib import Path
 PathLike = Union[str, Path]
 
 
-def get_args():
+def get_parser():
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -71,14 +71,21 @@ def get_args():
         default="./test_plots",
         help="Output directory for model results.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "-f", "--jupyter", default="jupyter", help="For jupyter compatability"
+    )
 
+    return parser
+
+def get_args():
+    parser = get_parser()
+    args = parser.parse_args()
     return args
 
 
 def args_from_json(args_json: PathLike):
-    parser = argparse.ArgumentParser()
-    with open(args_json, "rt") as f:
+    parser = get_parser() #argparse.ArgumentParser()
+    with open(args_json, "r") as f:
         t_args = argparse.Namespace()
         t_args.__dict__.update(json.load(f))
         args = parser.parse_args(namespace=t_args)

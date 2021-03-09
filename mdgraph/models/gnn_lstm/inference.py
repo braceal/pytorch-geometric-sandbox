@@ -35,7 +35,7 @@ def generate_embeddings(
     args = args_from_json(model_cfg_path)
 
     dataset = ContactMapDataset(h5_file, "contact_map", ["rmsd"])
-    data_loader = DataLoader(dataset, inference_batch_size)
+    data_loader = DataLoader(dataset, inference_batch_size, drop_last=True)
     num_nodes = dataset.num_nodes
 
     node_emb_recon_criterion = nn.MSELoss() if args.node_recon_loss else None
@@ -61,10 +61,12 @@ def generate_embeddings(
     lstm_ae.load_state_dict(checkpoint["lstm_ae_state_dict"])
 
     # Hardware
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu") #torch.device("cuda" if torch.cuda.is_available() else "cpu")
     node_encoder = node_encoder.to(device)
     node_decoder = node_decoder.to(device)
     lstm_ae = lstm_ae.to(device)
+
+    print("validating with rmsd")
 
     output, total_loss = validate_with_rmsd(
         node_encoder,

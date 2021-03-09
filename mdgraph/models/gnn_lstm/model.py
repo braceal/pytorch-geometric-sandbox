@@ -63,7 +63,7 @@ def recon_loss(decoder, z, pos_edge_index, neg_edge_index=None) -> torch.Tensor:
 
 class GCNEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super(GCNEncoder, self).__init__()
+        super().__init__()
         self.conv1 = GCNConv(in_channels, 2 * out_channels)
         self.conv2 = GCNConv(2 * out_channels, out_channels)
 
@@ -74,7 +74,7 @@ class GCNEncoder(nn.Module):
 
 class GATEncoder(nn.Module):
     def __init__(self, num_features: int, out_channels: int):
-        super(GATEncoder, self).__init__()
+        super().__init__()
 
         self.conv1 = GATConv(num_features, 8, heads=8, dropout=0.6)
         self.conv2 = GATConv(8 * 8, out_channels, heads=1, concat=False, dropout=0.6)
@@ -89,7 +89,7 @@ class GATEncoder(nn.Module):
 
 class VariationalGCNEncoder(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super(VariationalGCNEncoder, self).__init__()
+        super().__init__()
         self.conv1 = GCNConv(in_channels, 2 * out_channels)
         self.conv_mu = GCNConv(2 * out_channels, out_channels)
         self.conv_logstd = GCNConv(2 * out_channels, out_channels)
