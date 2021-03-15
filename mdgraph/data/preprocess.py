@@ -30,10 +30,11 @@ def aminoacid_int_encoding(pdb_file):
 
 
 def aminoacid_int_to_onehot(labels):
-    total_aa = np.max(labels) + 1
-    onehot = np.zeros((len(labels), total_aa))
+    # 20 amino acids total
+    onehot = np.zeros((len(labels), 20))
     for i, label in enumerate(labels):
-        onehot[i][label] = 1
+        # labels are 1 index ranging from [1, 20]
+        onehot[i][label - 1] = 1
     return onehot
 
 
