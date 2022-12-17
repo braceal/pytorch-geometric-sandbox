@@ -1,5 +1,6 @@
 from typing import Callable, Tuple, Dict, Optional
 from collections import defaultdict
+from tqdm import tqdm
 import numpy as np
 import torch
 from torch import nn
@@ -354,7 +355,7 @@ def validate_with_rmsd(
     total_loss = 0.0
     # return None, total_loss
     with torch.no_grad():
-        for sample in data_loader:
+        for sample in tqdm(data_loader):
             data = sample["data"]
             data = data.to(device)
 

@@ -62,12 +62,10 @@ def generate_embeddings(
 
     # Hardware
     device = torch.device("cpu")
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     node_encoder = node_encoder.to(device)
     node_decoder = node_decoder.to(device)
     lstm_ae = lstm_ae.to(device)
-
-    print("validating with rmsd")
 
     output, total_loss = validate_with_rmsd(
         node_encoder,

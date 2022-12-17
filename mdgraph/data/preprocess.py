@@ -141,7 +141,12 @@ def traj_to_dset(
     start_time = time.time()
 
     # Load simulation and reference structures
-    sim = MDAnalysis.Universe(str(topology), str(traj_file))
+    try:
+        sim = MDAnalysis.Universe(str(topology), str(traj_file))
+    except OSError as e:
+        print(f"Failed to construct Universe:\n\t{str(topology)}\n\t{str(traj_file)}")
+        return
+
     ref = MDAnalysis.Universe(str(ref_topology))
 
     if verbose:
